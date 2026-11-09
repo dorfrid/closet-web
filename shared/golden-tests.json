@@ -414,6 +414,326 @@
       }
     },
     {
+      "name": "coherence: 16C with shorts in closet → long pants, not shorts",
+      "fn": "recommend",
+      "input": {
+        "items": [
+          {
+            "id": "tee-white",
+            "category": "tee"
+          },
+          {
+            "id": "tee-black",
+            "category": "tee"
+          },
+          {
+            "id": "ls-grey",
+            "category": "longsleeve"
+          },
+          {
+            "id": "sweat-grey",
+            "category": "sweatshirt"
+          },
+          {
+            "id": "lj-navy",
+            "category": "lightjacket"
+          },
+          {
+            "id": "jacket-olive",
+            "category": "jacket"
+          },
+          {
+            "id": "jeans-dark",
+            "category": "jeans"
+          },
+          {
+            "id": "pants-warm",
+            "category": "warmpants"
+          },
+          {
+            "id": "sneakers-white",
+            "category": "sneakers"
+          },
+          {
+            "id": "boots-brown",
+            "category": "boots"
+          },
+          {
+            "id": "shorts-grey",
+            "category": "shorts"
+          }
+        ],
+        "window": {
+          "minFeelsC": 16,
+          "maxFeelsC": 20
+        },
+        "offsetC": 0,
+        "today": "2026-11-09",
+        "wears": [
+          {
+            "date": "2026-11-08",
+            "itemIds": [
+              "jeans-dark"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "status": "ok",
+        "effC": 16,
+        "requiredWarmth": 3,
+        "upperWarmth": 3,
+        "outfit": {
+          "base": "tee-black",
+          "mid": null,
+          "outer": "lj-navy",
+          "bottom": "pants-warm",
+          "shoes": "boots-brown"
+        },
+        "outerClosed": true,
+        "shortfall": 0
+      }
+    },
+    {
+      "name": "warm day 27C: shorts allowed",
+      "fn": "recommend",
+      "input": {
+        "items": [
+          {
+            "id": "tee-white",
+            "category": "tee"
+          },
+          {
+            "id": "tee-black",
+            "category": "tee"
+          },
+          {
+            "id": "ls-grey",
+            "category": "longsleeve"
+          },
+          {
+            "id": "sweat-grey",
+            "category": "sweatshirt"
+          },
+          {
+            "id": "lj-navy",
+            "category": "lightjacket"
+          },
+          {
+            "id": "jacket-olive",
+            "category": "jacket"
+          },
+          {
+            "id": "jeans-dark",
+            "category": "jeans"
+          },
+          {
+            "id": "pants-warm",
+            "category": "warmpants"
+          },
+          {
+            "id": "sneakers-white",
+            "category": "sneakers"
+          },
+          {
+            "id": "boots-brown",
+            "category": "boots"
+          },
+          {
+            "id": "shorts-grey",
+            "category": "shorts"
+          }
+        ],
+        "window": {
+          "minFeelsC": 27,
+          "maxFeelsC": 31
+        },
+        "offsetC": 0,
+        "today": "2026-11-09",
+        "wears": [
+          {
+            "date": "2026-11-08",
+            "itemIds": [
+              "jeans-dark"
+            ]
+          },
+          {
+            "date": "2026-11-07",
+            "itemIds": [
+              "pants-warm"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "status": "ok",
+        "effC": 27,
+        "requiredWarmth": 0,
+        "upperWarmth": 1,
+        "outfit": {
+          "base": "tee-black",
+          "mid": null,
+          "outer": null,
+          "bottom": "shorts-grey",
+          "shoes": "sneakers-white"
+        },
+        "outerClosed": null,
+        "shortfall": 0
+      }
+    },
+    {
+      "name": "work dress code: 27C but longPants → no shorts",
+      "fn": "recommend",
+      "input": {
+        "items": [
+          {
+            "id": "tee-white",
+            "category": "tee"
+          },
+          {
+            "id": "tee-black",
+            "category": "tee"
+          },
+          {
+            "id": "ls-grey",
+            "category": "longsleeve"
+          },
+          {
+            "id": "sweat-grey",
+            "category": "sweatshirt"
+          },
+          {
+            "id": "lj-navy",
+            "category": "lightjacket"
+          },
+          {
+            "id": "jacket-olive",
+            "category": "jacket"
+          },
+          {
+            "id": "jeans-dark",
+            "category": "jeans"
+          },
+          {
+            "id": "pants-warm",
+            "category": "warmpants"
+          },
+          {
+            "id": "sneakers-white",
+            "category": "sneakers"
+          },
+          {
+            "id": "boots-brown",
+            "category": "boots"
+          },
+          {
+            "id": "shorts-grey",
+            "category": "shorts"
+          }
+        ],
+        "window": {
+          "minFeelsC": 27,
+          "maxFeelsC": 31
+        },
+        "offsetC": 0,
+        "today": "2026-11-09",
+        "wears": [
+          {
+            "date": "2026-11-08",
+            "itemIds": [
+              "jeans-dark"
+            ]
+          },
+          {
+            "date": "2026-11-07",
+            "itemIds": [
+              "pants-warm"
+            ]
+          }
+        ],
+        "constraints": {
+          "longPants": true
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "effC": 27,
+        "requiredWarmth": 0,
+        "upperWarmth": 1,
+        "outfit": {
+          "base": "tee-black",
+          "mid": null,
+          "outer": null,
+          "bottom": "jeans-dark",
+          "shoes": "sneakers-white"
+        },
+        "outerClosed": null,
+        "shortfall": 0
+      }
+    },
+    {
+      "name": "work dress code with only shorts → incomplete: long pants",
+      "fn": "recommend",
+      "input": {
+        "items": [
+          {
+            "id": "tee-white",
+            "category": "tee"
+          },
+          {
+            "id": "tee-black",
+            "category": "tee"
+          },
+          {
+            "id": "ls-grey",
+            "category": "longsleeve"
+          },
+          {
+            "id": "sweat-grey",
+            "category": "sweatshirt"
+          },
+          {
+            "id": "lj-navy",
+            "category": "lightjacket"
+          },
+          {
+            "id": "jacket-olive",
+            "category": "jacket"
+          },
+          {
+            "id": "sneakers-white",
+            "category": "sneakers"
+          },
+          {
+            "id": "boots-brown",
+            "category": "boots"
+          },
+          {
+            "id": "shorts-grey",
+            "category": "shorts"
+          }
+        ],
+        "window": {
+          "minFeelsC": 27,
+          "maxFeelsC": 31
+        },
+        "offsetC": 0,
+        "today": "2026-11-09",
+        "wears": [],
+        "constraints": {
+          "longPants": true
+        }
+      },
+      "expected": {
+        "status": "incomplete",
+        "missing": [
+          "long pants"
+        ],
+        "effC": 27,
+        "requiredWarmth": 0
+      }
+    },
+    {
       "name": "offset: three 'warmer' answers",
       "fn": "personalOffset",
       "input": [

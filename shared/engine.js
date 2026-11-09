@@ -60,19 +60,25 @@ function recencyPenalty(item, lastWorn, today, cfg) {
 const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 // input: { items, window: {minFeelsC, maxFeelsC}, offsetC, today: "YYYY-MM-DD", wears: [{date, itemIds}],
-//          exclude?: [itemId], fixed?: { slot: itemId|null } }
+//          exclude?: [itemId], fixed?: { slot: itemId|null }, constraints?: { longPants: bool } }
+// constraints.longPants = hard rule (e.g. work dress code): shorts are never suggested.
 export function recommend(input, cfg) {
-  const { window, offsetC = 0, today, wears = [], exclude = [], fixed = {} } = input;
+  const { window, offsetC = 0, today, wears = [], exclude = [], fixed = {}, constraints = {} } = input;
   const items = input.items.filter(i => !i.deletedAt && i.status !== "laundry" && !exclude.includes(i.id)).sort(byId);
   const lastWorn = lastWornMap(wears);
   const pool = s => items.filter(i => slotOf(i, cfg) === s);
   const effC = Math.round((window.minFeelsC + offsetC) * 10) / 10;
   const need = requiredWarmth(effC, cfg);
 
-  const bases = pool("base"), mids = pool("mid"), outers = pool("outer"), bottoms = pool("bottom"), shoes = pool("shoes");
+  const bases = pool("base"), mids = pool("mid"), outers = pool("outer"), shoes = pool("shoes");
+  const isShorts = i => i.category === "shorts";
+  const allBottoms = pool("bottom");
+  // Hard rule (dress code): no shorts at all. Comfort rule: shorts only on warm days; fall back to them only if nothing else.
+  let bottoms = constraints.longPants ? allBottoms.filter(i => !isShorts(i)) : allBottoms;
+  if (!constraints.longPants && effC < cfg.shortsMinC && bottoms.some(i => !isShorts(i))) bottoms = bottoms.filter(i => !isShorts(i));
   const missing = [];
   if (!bases.length) missing.push("base");
-  if (!bottoms.length) missing.push("bottom");
+  if (!bottoms.length) missing.push(constraints.longPants && allBottoms.length ? "long pants" : "bottom");
   if (!shoes.length) missing.push("shoes");
   if (missing.length) return { status: "incomplete", missing, effC, requiredWarmth: need };
 
@@ -98,7 +104,10 @@ export function recommend(input, cfg) {
   }
 
   const warmBottom = effC < cfg.warmBottomBelowC;
-  const bottom = choose(bottoms, "bottom", i => (warmBottom && warmthOf(i, cfg) < 2 ? 10 : 0));
+  // Never shorts with a jacket or coat, whatever the temperature.
+  const heavyOuter = best.o && warmthOf(best.o, cfg) >= 3;
+  const hot = effC >= cfg.shortsMinC; // on hot days the lightest allowed bottom wins
+  const bottom = choose(bottoms, "bottom", i => (warmBottom && warmthOf(i, cfg) < 2 ? 10 : 0) + (heavyOuter && isShorts(i) ? 50 : 0) + (hot ? warmthOf(i, cfg) ** 2 * 3 : 0));
   const shoe = choose(shoes, "shoes", i =>
     (effC < cfg.warmBottomBelowC && i.category === "sandals" ? 10 : 0) + (effC >= 20 && warmthOf(i, cfg) >= 1 ? 10 : 0));
   const outerClosed = best.o ? effC < cfg.closeOuterBelowC : null;

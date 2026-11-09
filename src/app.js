@@ -7,7 +7,7 @@ import { openBulk, DEFAULT_MODEL, pendingBulk, resumeBulk, discardBulk } from ".
 import { testKey } from "./claude.js";
 import { recommend, alternatives, personalOffset, summarizeWindow, starterProgress } from "../shared/engine.js";
 
-const APP_VERSION = "0.6.3", SCHEMA = 1, PLATFORM = "web";
+const APP_VERSION = "0.7.0", SCHEMA = 1, PLATFORM = "web";
 const DEFAULT_LOC = { lat: 32.08, lon: 34.78, city: "Tel Aviv" };
 let cfg, state = { tab: "today", items: [], wears: [], ratings: [], settings: null, forecast: null };
 const $ = s => document.querySelector(s);
@@ -29,7 +29,8 @@ function logEvent(name, props = {}) {
 async function load() {
   [state.items, state.wears, state.ratings] = await Promise.all([db.all("items"), db.all("wears"), db.all("ratings")]);
   state.items = state.items.filter(i => !i.deletedAt);
-  state.settings = await db.kvGet("settings", { leave: "07:30", back: "19:00", ...DEFAULT_LOC, locSource: "default", lastPlace: "Outside shade", lastMinutes: 20 });
+  state.settings = { workDays: [0, 1, 2, 3, 4], longPantsAtWork: false,
+    ...(await db.kvGet("settings", { leave: "07:30", back: "19:00", ...DEFAULT_LOC, locSource: "default", lastPlace: "Outside shade", lastMinutes: 20 })) };
   state.forecast = await db.kvGet("forecast", null);
   state.apiKeySet = !!(await db.kvGet("anthropic", null))?.key;
 }
@@ -69,17 +70,19 @@ function tileHTML(item, meta, attrs = "") {
 }
 
 // ---------- engine glue ----------
+const isWorkDay = (d = new Date()) => state.settings.workDays.includes(d.getDay());
 function engineInput(extra = {}) {
   const w = state.forecast && summarizeWindow(state.forecast.hourly, localDate(), state.settings.leave, state.settings.back);
   return { items: state.items, window: w || { minFeelsC: 20, maxFeelsC: 24 }, windowKnown: !!w, offsetC: personalOffset(state.ratings, cfg), today: localDate(),
-    wears: state.wears.map(x => ({ date: x.date, itemIds: x.itemIds })), ...extra };
+    wears: state.wears.map(x => ({ date: x.date, itemIds: x.itemIds })),
+    constraints: { longPants: state.settings.longPantsAtWork && isWorkDay() }, ...extra };
 }
 async function todaySuggestion(reset = false) {
   const key = "suggest:" + localDate();
   let s = reset ? null : await db.kvGet(key, null);
-  if (s && s.outfit && Object.values(s.outfit).every(id => !id || itemById(id))) return s;
+  if (s && s.app === APP_VERSION && s.outfit && Object.values(s.outfit).every(id => !id || itemById(id))) return s;
   const r = recommend(engineInput({ exclude: s?.exclude || [] }), cfg);
-  s = { ...r, exclude: s?.exclude || [] };
+  s = { ...r, exclude: s?.exclude || [], app: APP_VERSION };
   await db.kvSet(key, s);
   if (r.status === "ok") logEvent("outfit_shown", { surface: "app", effC: r.effC, required: r.requiredWarmth });
   return s;
@@ -160,10 +163,13 @@ async function renderTodayInner(m) {
   const w = f && summarizeWindow(f.hourly, localDate(), s.leave, s.back);
   const wornToday = state.wears.find(x => x.date === localDate());
   let outfitHTML = "";
+  if (sug.status === "incomplete" && sug.missing?.includes("long pants"))
+    outfitHTML = `<section class="card"><h2>No long pants available</h2><p class="small">Today is a work day and your closet has no long pants that are clean. Add some, or mark a pair as clean.</p></section>`;
   if (sug.status === "ok") {
     const o = sug.outfit, order = ["outer", "mid", "base", "bottom", "shoes"].filter(k => o[k]);
     const tiles = order.map(k => tileHTML(itemById(o[k]), k === "outer" && sug.outerClosed != null ? (sug.outerClosed ? "Wear it closed" : "Open is fine") : null, `data-slot="${k}"`)).join("");
-    outfitHTML = `<section class="card"><div class="row"><h2>Today's outfit</h2><span class="small">${S.tapSwap}</span></div>
+    const work = state.settings.longPantsAtWork && isWorkDay();
+    outfitHTML = `<section class="card"><div class="row"><h2>Today's outfit</h2><span class="small">${work ? "Work day · long pants" : S.tapSwap}</span></div>
       <div class="grid2">${tiles}</div>
       ${sug.shortfall > 0 ? `<p class="small warm">Your closet is short on warm layers for ${deg(sug.effC)}. Add a sweater or jacket.</p>` : ""}
       ${wornToday ? `<div class="row"><span class="acc">✓ ${S.loggedToday}</span><button class="link muted" id="unwear">${S.undo}</button></div>`
@@ -197,7 +203,7 @@ async function another() {
   let r = recommend(engineInput({ exclude }), cfg);
   let ex = exclude;
   if (r.status !== "ok") { ex = []; r = recommend(engineInput(), cfg); }
-  await db.kvSet("suggest:" + localDate(), { ...r, exclude: ex });
+  await db.kvSet("suggest:" + localDate(), { ...r, exclude: ex, app: APP_VERSION });
   logEvent("outfit_regenerated");
   render();
 }
@@ -213,7 +219,7 @@ async function openSwap(sug, slot) {
       const prev = { ...sug };
       const fixed = { ...sug.outfit, [slot]: b.dataset.id };
       const r = recommend(engineInput({ fixed }), cfg);
-      await db.kvSet("suggest:" + localDate(), { ...r, exclude: sug.exclude || [] });
+      await db.kvSet("suggest:" + localDate(), { ...r, exclude: sug.exclude || [], app: APP_VERSION });
       logEvent("outfit_swapped", { slot });
       close(); render();
       toast("Swapped", async () => { await db.kvSet("suggest:" + localDate(), prev); render(); });
@@ -389,6 +395,8 @@ function renderSettings(m) {
     <div class="sub">YOUR DAY</div><section class="card list">
       <div class="li"><span>Leave home</span><input type="time" id="lv" value="${s.leave}"></div>
       <div class="li"><span>Back home</span><input type="time" id="bk" value="${s.back}"></div>
+      <div class="li" style="flex-wrap:wrap"><span>Work days</span><span class="chips" id="wd">${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d, i) => `<button class="chip" data-d="${i}" aria-pressed="${s.workDays.includes(i)}" style="min-height:36px;padding:0 10px">${d}</button>`).join("")}</span></div>
+      <div class="li"><span>Long pants on work days</span><button class="chip" id="lp" aria-pressed="${s.longPantsAtWork}">${s.longPantsAtWork ? "On" : "Off"}</button></div>
       <div class="li"><span>Location</span><span class="row"><span class="small">${esc(s.city || `${s.lat.toFixed(2)}, ${s.lon.toFixed(2)}`)}</span><button class="link" id="loc">Use my location</button></span></div></section>
     <div class="sub">COMFORT</div><section class="card list">
       <div class="li"><span>You run</span><span class="small">${off === 0 ? "about average" : `${Math.abs(off).toFixed(1)}° ${off < 0 ? "colder" : "warmer"} than average`} · ${state.ratings.length} ratings</span></div>
@@ -405,6 +413,12 @@ function renderSettings(m) {
   $("#back").onclick = () => setTab("closet");
   $("#lv").onchange = e => saveSettings({ leave: e.target.value }).then(() => db.kvSet("suggest:" + localDate(), null));
   $("#bk").onchange = e => saveSettings({ back: e.target.value }).then(() => db.kvSet("suggest:" + localDate(), null));
+  m.querySelectorAll("#wd [data-d]").forEach(b => (b.onclick = async () => {
+    const d = +b.dataset.d, set = new Set(state.settings.workDays);
+    set.has(d) ? set.delete(d) : set.add(d);
+    await saveSettings({ workDays: [...set].sort() }); await db.kvSet("suggest:" + localDate(), null); render();
+  }));
+  $("#lp").onclick = async () => { await saveSettings({ longPantsAtWork: !state.settings.longPantsAtWork }); await db.kvSet("suggest:" + localDate(), null); logEvent("settings_changed", { key: "longPantsAtWork" }); render(); };
   $("#loc").onclick = () => navigator.geolocation.getCurrentPosition(async p => {
     await saveSettings({ lat: p.coords.latitude, lon: p.coords.longitude, city: "Current location", locSource: "gps" });
     await getForecast(true); await db.kvSet("suggest:" + localDate(), null); render();
