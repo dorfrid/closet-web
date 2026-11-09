@@ -14,7 +14,7 @@
 import * as db from "./db.js";
 
 // OAuth Client ID is public by design (it identifies the app, it is not a secret). Paste it here or in Settings.
-export const GOOGLE_CLIENT_ID = "";
+export const GOOGLE_CLIENT_ID = "891048816809-91jh5fq0dbmojo4ebk8g38e4hgs760u8.apps.googleusercontent.com";
 const SCOPE = "https://www.googleapis.com/auth/drive.appdata";
 const API = "https://www.googleapis.com/drive/v3", UP = "https://www.googleapis.com/upload/drive/v3";
 const KV = "gdrive", REDIRECT_GUARD = "gdrive:redirectAt";
