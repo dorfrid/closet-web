@@ -1,19 +1,10 @@
 // On-device vision for bulk import. Nothing here sends images anywhere.
 // - Clothes parsing: SegFormer B2 (clothes), via Transformers.js. ~29 MB first download (q8), cached by the browser.
 // - Faces: hidden using the same parser (face/hair labels + everything above the shirt). No second model.
-const TF_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
+import { runModel } from "./ml.js";
 
-let segP;
-export function loadSegmenter(onProgress) {
-  segP ||= (async () => {
-    const tf = await import(TF_URL);
-    // q8 = 29 MB model (fp32 is 110 MB and crashed iPhone Safari from memory pressure).
-    return tf.pipeline("image-segmentation", "Xenova/segformer_b2_clothes", { dtype: "q8", device: "wasm",
-      progress_callback: p => { if (p.status === "progress" && p.total) onProgress?.(p.loaded / p.total); },
-    });
-  })();
-  return segP;
-}
+export function loadSegmenter(onProgress) { return runModel("seg", null, onProgress); }
+
 export async function blobToCanvas(blob, maxSide = 768) {
   const bmp = await createImageBitmap(blob);
   const k = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
@@ -33,25 +24,28 @@ const GROUPS = {
 
 // Returns { width, height, masks: { upper, lower, shoes, face } } where each mask is Uint8Array (0/1) or null.
 export async function parseClothes(canvas) {
-  const seg = await loadSegmenter();
-  const out = await seg(canvas.toDataURL("image/jpeg", 0.9));
+  const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", 0.9));
+  const out = await runModel("seg", blob);
   const w = canvas.width, h = canvas.height;
+  const read = o => { // value at canvas pixel i, nearest-neighbour if the mask size differs
+    if (o.width === w && o.height === h) return i => o.data[i * o.channels];
+    return i => { const x = i % w, y = (i / w) | 0; return o.data[(((y * o.height / h) | 0) * o.width + ((x * o.width / w) | 0)) * o.channels]; };
+  };
   const masks = {};
-  // Every non-background pixel = a person (any person in the photo).
   const person = new Uint8Array(w * h);
   for (const o of out) {
     if (o.label === "Background") continue;
-    const mk = o.mask.width === w && o.mask.height === h ? o.mask : await o.mask.resize(w, h);
-    for (let i = 0; i < person.length; i++) if (mk.data[i * mk.channels] > 127) person[i] = 1;
+    const r = read(o);
+    for (let i = 0; i < person.length; i++) if (r(i) > 127) person[i] = 1;
   }
   masks.person = person;
   for (const [g, labels] of Object.entries(GROUPS)) {
     let m = null;
     for (const o of out) {
       if (!labels.includes(o.label)) continue;
-      const mk = o.mask.width === w && o.mask.height === h ? o.mask : await o.mask.resize(w, h);
+      const r = read(o);
       m ||= new Uint8Array(w * h);
-      for (let i = 0; i < m.length; i++) if (mk.data[i * mk.channels] > 127) m[i] = 1;
+      for (let i = 0; i < m.length; i++) if (r(i) > 127) m[i] = 1;
     }
     masks[g] = m;
   }

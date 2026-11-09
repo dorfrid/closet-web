@@ -1,6 +1,6 @@
 // App shell cache. Bump VERSION on every release so phones pick up new files.
-const VERSION = "closet-0.7.1";
-const SHELL = ["./", "index.html", "app.css", "manifest.webmanifest", "src/app.js", "src/db.js", "src/weather.js", "src/images.js", "src/tokens.js", "src/strings.js", "src/bulk.js", "src/vision.js", "src/claude.js", "shared/engine.js", "shared/config.json", "shared/tokens.json", "icons/icon-180.png"];
+const VERSION = "closet-0.7.3";
+const SHELL = ["./", "index.html", "app.css", "manifest.webmanifest", "src/app.js", "src/db.js", "src/weather.js", "src/images.js", "src/tokens.js", "src/strings.js", "src/bulk.js", "src/vision.js", "src/claude.js", "src/ml.js", "src/ml-worker.js", "shared/engine.js", "shared/config.json", "shared/tokens.json", "icons/icon-180.png"];
 self.addEventListener("install", e => e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener("activate", e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== VERSION).map(k => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener("fetch", e => {

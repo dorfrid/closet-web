@@ -77,7 +77,7 @@ async function run(ctx, files, api) {
 
   try {
     say("Downloading the clothes model…", 0);
-    await loadSegmenter(f => say(`Downloading the clothes model… ${Math.round(f * 100)}%`, f * 0.15));
+    await loadSegmenter(f => f != null && say(`Downloading the clothes model… ${Math.round(f * 100)}%`, f * 0.15));
     // Pass 1: solo photos go straight through; group photos wait for "This is me".
     for (let i = 0; i < files.length && !stop; i++) {
       say(`Photo ${i + 1} of ${files.length}: looking for people`, 0.15 + 0.6 * (i / files.length));
