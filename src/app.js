@@ -3,11 +3,11 @@ import { fetchForecast } from "./weather.js";
 import { normalize, removeBackground } from "./images.js";
 import { applyTokens } from "./tokens.js";
 import { S } from "./strings.js";
-import { openBulk, DEFAULT_MODEL } from "./bulk.js";
+import { openBulk, DEFAULT_MODEL, pendingBulk, resumeBulk, discardBulk } from "./bulk.js";
 import { testKey } from "./claude.js";
 import { recommend, alternatives, personalOffset, summarizeWindow, starterProgress } from "../shared/engine.js";
 
-const APP_VERSION = "0.6.0", SCHEMA = 1, PLATFORM = "web";
+const APP_VERSION = "0.6.1", SCHEMA = 1, PLATFORM = "web";
 const DEFAULT_LOC = { lat: 32.08, lon: 34.78, city: "Tel Aviv" };
 let cfg, state = { tab: "today", items: [], wears: [], ratings: [], settings: null, forecast: null };
 const $ = s => document.querySelector(s);
@@ -126,7 +126,22 @@ const ctx = () => ({ sheet, toast, db, cfg, state, render, setTab, logEvent, uid
 const bulk = () => openBulk(ctx());
 
 // ---------- Today ----------
+async function bulkBanner(m) {
+  const pend = await pendingBulk(ctx());
+  if (!pend) return;
+  const d = document.createElement("section");
+  d.className = "card";
+  d.innerHTML = `<h2>Unfinished photo import</h2><p class="small">${pend.done} of ${pend.total} photos were processed before the app closed. Review them now, or discard.</p>
+    <button class="btn primary" id="bk-r">Review ${pend.done} photos</button><button class="btn" id="bk-d">Discard</button>`;
+  m.querySelector("header").after(d);
+  d.querySelector("#bk-r").onclick = () => resumeBulk(ctx());
+  d.querySelector("#bk-d").onclick = async () => { await discardBulk(ctx()); render(); };
+}
 async function renderToday(m) {
+  await renderTodayInner(m);
+  await bulkBanner(m);
+}
+async function renderTodayInner(m) {
   const s = state.settings, p = starterProgress(state.items, cfg);
   const head = `<header><div class="sub">${new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} · ${esc(s.city || "Saved place")}</div><h1>${S.today}</h1></header>`;
   if (!p.ready) {

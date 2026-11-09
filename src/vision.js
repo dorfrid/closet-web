@@ -1,34 +1,25 @@
 // On-device vision for bulk import. Nothing here sends images anywhere.
-// - Clothes parsing: SegFormer B2 (clothes), via Transformers.js. ~100 MB first download, cached by the browser.
-// - Face detection: MediaPipe BlazeFace (~0.3 MB), used together with the parser's Face/Hair labels.
+// - Clothes parsing: SegFormer B2 (clothes), via Transformers.js. ~29 MB first download (q8), cached by the browser.
+// - Faces: hidden using the same parser (face/hair labels + everything above the shirt). No second model.
 const TF_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
-const MP_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.2";
-const FACE_MODEL = "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
 
-let segP, faceP;
+let segP;
 export function loadSegmenter(onProgress) {
   segP ||= (async () => {
     const tf = await import(TF_URL);
-    return tf.pipeline("image-segmentation", "Xenova/segformer_b2_clothes", {
+    // q8 = 29 MB model (fp32 is 110 MB and crashed iPhone Safari from memory pressure).
+    return tf.pipeline("image-segmentation", "Xenova/segformer_b2_clothes", { dtype: "q8", device: "wasm",
       progress_callback: p => { if (p.status === "progress" && p.total) onProgress?.(p.loaded / p.total); },
     });
   })();
   return segP;
 }
-function loadFaces() {
-  faceP ||= (async () => {
-    const mp = await import(MP_URL);
-    const files = await mp.FilesetResolver.forVisionTasks(MP_URL + "/wasm");
-    return mp.FaceDetector.createFromOptions(files, { baseOptions: { modelAssetPath: FACE_MODEL }, runningMode: "IMAGE", minDetectionConfidence: 0.3 });
-  })();
-  return faceP;
-}
-
-export async function blobToCanvas(blob) {
+export async function blobToCanvas(blob, maxSide = 768) {
   const bmp = await createImageBitmap(blob);
+  const k = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
   const c = document.createElement("canvas");
-  c.width = bmp.width; c.height = bmp.height;
-  c.getContext("2d").drawImage(bmp, 0, 0);
+  c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
   bmp.close?.();
   return c;
 }
@@ -76,24 +67,20 @@ function pixelate(ctx, x, y, w, h) {
   ctx.imageSmoothingEnabled = false; ctx.drawImage(t, 0, 0, t.width, t.height, x, y, w, h); ctx.imageSmoothingEnabled = true;
 }
 
-// Hides faces in place. Union of MediaPipe boxes and the parser's face/hair region, both expanded.
-// Returns the number of regions hidden.
+// Hides faces in place, without a second model (memory): the parser's face/hair region, plus the whole band
+// above the top of the upper garment (where a head is). Returns the number of regions hidden, or -1 if no person
+// was found (then the photo must not be sent).
 export async function hideFaces(canvas, parsed) {
   const ctx = canvas.getContext("2d");
-  const regions = [];
-  try {
-    const det = await loadFaces();
-    for (const d of det.detect(canvas).detections) {
-      const b = d.boundingBox;
-      regions.push({ x: b.originX - b.width * 0.4, y: b.originY - b.height * 0.6, w: b.width * 1.8, h: b.height * 1.9 });
-    }
-  } catch (e) { console.warn("face detector unavailable", e); }
-  if (parsed?.masks.face) {
-    const b = bbox(parsed.masks.face, parsed.width, parsed.height);
-    if (b) { const bw = b.x1 - b.x0, bh = b.y1 - b.y0; regions.push({ x: b.x0 - bw * 0.2, y: b.y0 - bh * 0.2, w: bw * 1.4, h: bh * 1.4 }); }
-  }
+  const W = parsed.width, H = parsed.height, regions = [];
+  const up = parsed.masks.upper && bbox(parsed.masks.upper, W, H);
+  const lo = parsed.masks.lower && bbox(parsed.masks.lower, W, H);
+  const fb = parsed.masks.face && bbox(parsed.masks.face, W, H);
+  if (fb) { const bw = fb.x1 - fb.x0, bh = fb.y1 - fb.y0; regions.push({ x: fb.x0 - bw * 0.25, y: fb.y0 - bh * 0.25, w: bw * 1.5, h: bh * 1.5 }); }
+  if (up) regions.push({ x: 0, y: 0, w: W, h: up.y0 });
+  else if (!fb && !lo) return -1;
   for (const r of regions) pixelate(ctx, r.x, r.y, r.w, r.h);
-  if (parsed) parsed.hidden = regions;
+  parsed.hidden = regions;
   return regions.length;
 }
 

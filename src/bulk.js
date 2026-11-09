@@ -19,7 +19,7 @@ export async function openBulk(ctx) {
   sheet(`<h2>Import from your photos</h2>
     <p class="small">Pick up to ${MAX_PHOTOS} photos of you wearing clothes. On this phone: location data is removed, faces are hidden, and each garment is cut out.
     Only the face-hidden photo is sent to Claude to name and match the garments. Your original photos are not stored in the app.</p>
-    <p class="small">First run downloads the clothes model (about 100 MB). Wi-Fi recommended.</p>
+    <p class="small">First run downloads the clothes model (about 30 MB). Wi-Fi recommended. If the app closes midway, finished photos are kept and you can review them.</p>
     <label class="btn primary">Choose photos<input id="bulk" type="file" accept="image/*" multiple class="hidden"></label>`, (el, close) => {
     el.querySelector("#bulk").onchange = e => {
       const files = [...e.target.files].slice(0, MAX_PHOTOS);
@@ -41,6 +41,8 @@ async function run(ctx, files, api) {
   const say = (m, f) => { msgEl.querySelector("#msg").textContent = m; if (f != null) msgEl.querySelector("#pb").style.width = Math.round(f * 100) + "%"; };
   const categories = Object.keys(cfg.categories);
   const entries = [], failures = [];
+  const SESSION = "bulk:session";
+  await ctx.db.kvSet(SESSION, { startedAt: new Date().toISOString(), total: files.length, done: 0, entries: [] });
   try {
     say("Downloading the clothes model…", 0);
     await loadSegmenter(f => say(`Downloading the clothes model… ${Math.round(f * 100)}%`, f * 0.2));
@@ -50,7 +52,7 @@ async function run(ctx, files, api) {
         say(`Photo ${i + 1} of ${files.length}: hiding faces`, base);
         const canvas = await blobToCanvas(await normalize(files[i]));
         const parsed = await parseClothes(canvas);
-        await hideFaces(canvas, parsed);
+        if ((await hideFaces(canvas, parsed)) < 0) { failures.push({ photo: i + 1, error: "No person found" }); canvas.width = 0; continue; }
         say(`Photo ${i + 1} of ${files.length}: naming garments`, base + 0.35 / files.length);
         const b64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
         const { garments = [] } = await labelPhoto(api.key, api.model || DEFAULT_MODEL, b64, categories);
@@ -64,17 +66,13 @@ async function run(ctx, files, api) {
           entries.push({ key: `p${i}g${j}`, photo: i, date: files[i].lastModified, category: g.category, color: g.color || "", description: g.description || "",
             visibility: g.visibility, crop: cut?.blob || null, area: cut?.area || 0 });
         });
+        canvas.width = 0; // free memory before the next photo
+        await ctx.db.kvSet(SESSION, { startedAt: new Date().toISOString(), total: files.length, done: i + 1, entries });
       } catch (e) { failures.push({ photo: i + 1, error: e.message }); console.warn(e); if (/API/.test(e.message) && /401|auth|key/i.test(e.message)) break; }
     }
     if (stop) { closeProgress(); toast("Import cancelled. Nothing was added."); logEvent("capture_abandoned", { stage: "bulk" }); return; }
     say("Matching the same garment across photos…", 0.92);
-    let groups = entries.map(e => [e.key]);
-    if (entries.length > 1) {
-      try {
-        const res = await matchGarments(api.key, api.model || DEFAULT_MODEL, entries.map(({ key, category, color, description }) => ({ key, category, color, description })));
-        groups = sanitizeGroups(res.groups, entries);
-      } catch (e) { failures.push({ photo: "matching", error: e.message }); }
-    }
+    const groups = await matchAll(api, entries, failures);
     closeProgress();
     logEvent("bulk_processed", { photos: files.length, garments: entries.length, groups: groups.length, failures: failures.length, ms: Math.round(performance.now() - t0) });
     pieceCheck(ctx, entries, groups, failures, files.length);
@@ -82,6 +80,33 @@ async function run(ctx, files, api) {
     closeProgress(); toast("Import stopped: " + e.message); logEvent("capture_abandoned", { stage: "bulk", error: e.message.slice(0, 80) });
   }
 }
+
+async function matchAll(api, entries, failures) {
+  let groups = entries.map(e => [e.key]);
+  if (entries.length > 1) {
+    try {
+      const res = await matchGarments(api.key, api.model || DEFAULT_MODEL, entries.map(({ key, category, color, description }) => ({ key, category, color, description })));
+      groups = sanitizeGroups(res.groups, entries);
+    } catch (e) { failures.push({ photo: "matching", error: e.message }); }
+  }
+  return groups;
+}
+
+// Unfinished import (e.g. iOS closed the app): review what was saved.
+export async function pendingBulk(ctx) {
+  const s = await ctx.db.kvGet("bulk:session", null);
+  return s && s.entries?.length ? s : null;
+}
+export async function resumeBulk(ctx) {
+  const s = await pendingBulk(ctx);
+  const api = await ctx.db.kvGet("anthropic", null);
+  if (!s) return;
+  if (!api?.key) { ctx.toast("Add your API key in Settings to finish matching"); return; }
+  const failures = [];
+  const groups = await matchAll(api, s.entries, failures);
+  pieceCheck(ctx, s.entries, groups, failures, s.done);
+}
+export async function discardBulk(ctx) { await ctx.db.del("kv", "bulk:session"); }
 
 // Every key exactly once; unknown keys dropped; missing keys become their own group; groups never mix slots.
 export function sanitizeGroups(groups, entries) {
@@ -152,6 +177,7 @@ function pieceCheck(ctx, entries, groups, failures, nPhotos) {
       await db.kvSet("suggest:" + localDate(), null);
       logEvent("bulk_import_done", { found: cards.length, added: chosen.length, days });
       cards.forEach(c => c.url && URL.revokeObjectURL(c.url));
+      await db.del("kv", "bulk:session");
       close(); toast(`Added ${chosen.length} items${days ? `, ${days} days logged` : ""}`); render();
     };
   });
