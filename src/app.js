@@ -3,9 +3,11 @@ import { fetchForecast } from "./weather.js";
 import { normalize, removeBackground } from "./images.js";
 import { applyTokens } from "./tokens.js";
 import { S } from "./strings.js";
+import { openBulk, DEFAULT_MODEL } from "./bulk.js";
+import { testKey } from "./claude.js";
 import { recommend, alternatives, personalOffset, summarizeWindow, starterProgress } from "../shared/engine.js";
 
-const APP_VERSION = "0.5.0", SCHEMA = 1, PLATFORM = "web";
+const APP_VERSION = "0.6.0", SCHEMA = 1, PLATFORM = "web";
 const DEFAULT_LOC = { lat: 32.08, lon: 34.78, city: "Tel Aviv" };
 let cfg, state = { tab: "today", items: [], wears: [], ratings: [], settings: null, forecast: null };
 const $ = s => document.querySelector(s);
@@ -29,6 +31,7 @@ async function load() {
   state.items = state.items.filter(i => !i.deletedAt);
   state.settings = await db.kvGet("settings", { leave: "07:30", back: "19:00", ...DEFAULT_LOC, locSource: "default", lastPlace: "Outside shade", lastMinutes: 20 });
   state.forecast = await db.kvGet("forecast", null);
+  state.apiKeySet = !!(await db.kvGet("anthropic", null))?.key;
 }
 async function saveSettings(patch) { state.settings = { ...state.settings, ...patch }; await db.kvSet("settings", state.settings); }
 
@@ -119,6 +122,9 @@ async function render() {
   hydrateImages(m);
 }
 
+const ctx = () => ({ sheet, toast, db, cfg, state, render, setTab, logEvent, uid, nowISO, localDate, esc });
+const bulk = () => openBulk(ctx());
+
 // ---------- Today ----------
 async function renderToday(m) {
   const s = state.settings, p = starterProgress(state.items, cfg);
@@ -127,9 +133,11 @@ async function renderToday(m) {
     const row = (l, [a, b]) => `<div class="li"><span>${l}</span><span class="${a >= b ? "acc" : "small"}">${a} of ${b}</span></div>`;
     m.innerHTML = `${head}<section class="card"><h2>${S.starterTitle(p.total, p.goal)}</h2><div class="bar"><i style="width:${Math.min(100, p.total / p.goal * 100)}%"></i></div>
       <div class="list">${row("Tops", p.base)}${row("Bottoms", p.bottom)}${row("Shoes", p.shoes)}${row("Outer layer", p.outer)}</div>
-      <button class="btn primary" id="go-add">${S.addItems}</button></section>
+      <button class="btn primary" id="go-bulk">Import from my outfit photos</button>
+      <button class="btn" id="go-add">Add one by one</button></section>
       <p class="small">Shoot what you wear this week. Your first outfit appears once you have a top, a bottom and shoes.</p>`;
     $("#go-add").onclick = openAdd;
+    $("#go-bulk").onclick = bulk;
     return;
   }
   const f = await getForecast();
@@ -260,7 +268,9 @@ function openAdd() {
   logEvent("capture_started", { channel: "picker" });
   sheet(`<h2>${S.addItems}</h2><p class="small">Every photo is saved first, so nothing is lost. You pick what it is with one tap.</p>
     <label class="btn primary">${S.camera}<input id="cam" type="file" accept="image/*" capture="environment" class="hidden"></label>
-    <label class="btn">${S.photos}<input id="lib" type="file" accept="image/*" multiple class="hidden"></label>`, (el, close) => {
+    <label class="btn">${S.photos}<input id="lib" type="file" accept="image/*" multiple class="hidden"></label>
+    <button class="btn" id="bulk">Import from my outfit photos</button>`, (el, close) => {
+    el.querySelector("#bulk").onclick = () => { close(); bulk(); };
     const handle = async files => { close(); for (const f of files) await addPhoto(f); };
     el.querySelector("#cam").onchange = e => handle([...e.target.files]);
     el.querySelector("#lib").onchange = e => handle([...e.target.files]);
@@ -368,6 +378,10 @@ function renderSettings(m) {
     <div class="sub">COMFORT</div><section class="card list">
       <div class="li"><span>You run</span><span class="small">${off === 0 ? "about average" : `${Math.abs(off).toFixed(1)}° ${off < 0 ? "colder" : "warmer"} than average`} · ${state.ratings.length} ratings</span></div>
       <div class="li"><span>Reset what the app learned</span><button class="link" id="rst">Reset</button></div></section>
+    <div class="sub">CLOUD LABELING (photo import)</div><section class="card list">
+      <div class="li"><span>Anthropic API key</span><span class="row"><span class="small" id="keyst">${state.apiKeySet ? "Saved on this phone" : "Not set"}</span></span></div>
+      <div class="li"><input type="password" id="apikey" placeholder="sk-ant-…" autocomplete="off" style="flex:1"><button class="link" id="savekey">Save</button></div>
+      <div class="li"><span class="small">Use a dedicated workspace key with a low monthly limit. Only face-hidden photos are sent.</span>${state.apiKeySet ? '<button class="link muted" id="delkey">Remove</button>' : ""}</div></section>
     <div class="sub">YOUR DATA (stays on this phone)</div><section class="card list">
       <div class="li"><span>${S.export}</span><button class="link" id="ex">Export</button></div>
       <div class="li"><span>${S.import}</span><label class="link" style="display:flex;align-items:center">Import<input type="file" id="im" accept="application/json,.json" class="hidden"></label></div>
@@ -384,6 +398,14 @@ function renderSettings(m) {
     if (!confirm("Reset the learned offset? Your ratings stay in History and export, but stop affecting suggestions.")) return;
     await saveSettings({ offsetResetAt: nowISO() }); state.ratings = state.ratings.filter(r => r.ts > state.settings.offsetResetAt); render();
   };
+  $("#savekey").onclick = async () => {
+    const key = $("#apikey").value.trim();
+    if (!/^sk-ant-/.test(key)) { toast("That does not look like an Anthropic key"); return; }
+    $("#keyst").textContent = "Checking…";
+    try { await testKey(key, DEFAULT_MODEL); await db.kvSet("anthropic", { key, model: DEFAULT_MODEL }); state.apiKeySet = true; toast("Key works and is saved"); render(); }
+    catch (e) { $("#keyst").textContent = "Not saved"; toast(e.message); }
+  };
+  $("#delkey") && ($("#delkey").onclick = async () => { await db.del("kv", "anthropic"); state.apiKeySet = false; render(); });
   $("#ex").onclick = exportAll;
   $("#im").onchange = e => importAll(e.target.files[0]);
   $("#da").onclick = async () => {
@@ -394,7 +416,7 @@ function renderSettings(m) {
 }
 const b64 = blob => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
 async function exportAll() {
-  const [items, photos, wears, ratings, events, kv] = await Promise.all(db.STORES.map(s => db.all(s)));
+  const [items, photos, wears, ratings, events] = await Promise.all(["items", "photos", "wears", "ratings", "events"].map(s => db.all(s)));
   const ph = [];
   for (const p of photos) ph.push({ id: p.id, createdAt: p.createdAt, original: await b64(p.original), cutout: p.cutout ? await b64(p.cutout) : null });
   const out = { format: "closet-export", schemaVersion: SCHEMA, exportedAt: nowISO(), platform: PLATFORM, appVersion: APP_VERSION,

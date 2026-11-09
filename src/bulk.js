@@ -1,0 +1,158 @@
+// Bulk import from photos of you wearing clothes.
+// Phone: strip metadata, hide faces, cut garments. Cloud (your key): label + match garments. You: confirm in one list.
+import { normalize } from "./images.js";
+import { loadSegmenter, blobToCanvas, parseClothes, hideFaces, cutRegion } from "./vision.js";
+import { labelPhoto, matchGarments } from "./claude.js";
+
+const MAX_PHOTOS = 30;
+export const DEFAULT_MODEL = "claude-sonnet-5-5";
+
+export async function openBulk(ctx) {
+  const { sheet, db, setTab, esc } = ctx;
+  const api = await db.kvGet("anthropic", null);
+  if (!api?.key) {
+    sheet(`<h2>Import from your photos</h2>
+      <p class="small">This needs your own Anthropic API key, saved only on this phone. Add it in Settings → Cloud labeling.</p>
+      <button class="btn primary" id="go">Open Settings</button>`, (el, close) => (el.querySelector("#go").onclick = () => { close(); setTab("settings"); }));
+    return;
+  }
+  sheet(`<h2>Import from your photos</h2>
+    <p class="small">Pick up to ${MAX_PHOTOS} photos of you wearing clothes. On this phone: location data is removed, faces are hidden, and each garment is cut out.
+    Only the face-hidden photo is sent to Claude to name and match the garments. Your original photos are not stored in the app.</p>
+    <p class="small">First run downloads the clothes model (about 100 MB). Wi-Fi recommended.</p>
+    <label class="btn primary">Choose photos<input id="bulk" type="file" accept="image/*" multiple class="hidden"></label>`, (el, close) => {
+    el.querySelector("#bulk").onchange = e => {
+      const files = [...e.target.files].slice(0, MAX_PHOTOS);
+      close();
+      if (files.length) run(ctx, files, api);
+    };
+  });
+}
+
+async function run(ctx, files, api) {
+  const { sheet, cfg, logEvent, toast } = ctx;
+  const t0 = performance.now();
+  logEvent("capture_started", { channel: "bulk", photos: files.length });
+  let msgEl, stop = false;
+  const closeProgress = sheet(`<h2>Finding your clothes</h2><p class="sub" id="msg">Starting…</p><div class="bar"><i id="pb" style="width:0%"></i></div>
+    <p class="small">Keep this screen open. You can cancel any time; nothing is added until you confirm.</p><button class="btn" id="cancel">Cancel</button>`, el => {
+    msgEl = el; el.querySelector("#cancel").onclick = () => { stop = true; };
+  });
+  const say = (m, f) => { msgEl.querySelector("#msg").textContent = m; if (f != null) msgEl.querySelector("#pb").style.width = Math.round(f * 100) + "%"; };
+  const categories = Object.keys(cfg.categories);
+  const entries = [], failures = [];
+  try {
+    say("Downloading the clothes model…", 0);
+    await loadSegmenter(f => say(`Downloading the clothes model… ${Math.round(f * 100)}%`, f * 0.2));
+    for (let i = 0; i < files.length && !stop; i++) {
+      const base = 0.2 + 0.7 * (i / files.length);
+      try {
+        say(`Photo ${i + 1} of ${files.length}: hiding faces`, base);
+        const canvas = await blobToCanvas(await normalize(files[i]));
+        const parsed = await parseClothes(canvas);
+        await hideFaces(canvas, parsed);
+        say(`Photo ${i + 1} of ${files.length}: naming garments`, base + 0.35 / files.length);
+        const b64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+        const { garments = [] } = await labelPhoto(api.key, api.model || DEFAULT_MODEL, b64, categories);
+        const cuts = {};
+        for (const g of ["upper", "lower", "shoes"]) cuts[g] = await cutRegion(canvas, parsed, g);
+        garments.forEach((g, j) => {
+          if (!cfg.categories[g.category]) return;
+          const slot = cfg.categories[g.category].slot;
+          const region = slot === "bottom" ? "lower" : slot === "shoes" ? "shoes" : g.outermost ? "upper" : null;
+          const cut = region ? cuts[region] : null;
+          entries.push({ key: `p${i}g${j}`, photo: i, date: files[i].lastModified, category: g.category, color: g.color || "", description: g.description || "",
+            visibility: g.visibility, crop: cut?.blob || null, area: cut?.area || 0 });
+        });
+      } catch (e) { failures.push({ photo: i + 1, error: e.message }); console.warn(e); if (/API/.test(e.message) && /401|auth|key/i.test(e.message)) break; }
+    }
+    if (stop) { closeProgress(); toast("Import cancelled. Nothing was added."); logEvent("capture_abandoned", { stage: "bulk" }); return; }
+    say("Matching the same garment across photos…", 0.92);
+    let groups = entries.map(e => [e.key]);
+    if (entries.length > 1) {
+      try {
+        const res = await matchGarments(api.key, api.model || DEFAULT_MODEL, entries.map(({ key, category, color, description }) => ({ key, category, color, description })));
+        groups = sanitizeGroups(res.groups, entries);
+      } catch (e) { failures.push({ photo: "matching", error: e.message }); }
+    }
+    closeProgress();
+    logEvent("bulk_processed", { photos: files.length, garments: entries.length, groups: groups.length, failures: failures.length, ms: Math.round(performance.now() - t0) });
+    pieceCheck(ctx, entries, groups, failures, files.length);
+  } catch (e) {
+    closeProgress(); toast("Import stopped: " + e.message); logEvent("capture_abandoned", { stage: "bulk", error: e.message.slice(0, 80) });
+  }
+}
+
+// Every key exactly once; unknown keys dropped; missing keys become their own group; groups never mix slots.
+export function sanitizeGroups(groups, entries) {
+  const byKey = Object.fromEntries(entries.map(e => [e.key, e]));
+  const seen = new Set(), out = [];
+  for (const g of Array.isArray(groups) ? groups : []) {
+    const keep = (Array.isArray(g) ? g : []).filter(k => byKey[k] && !seen.has(k));
+    if (!keep.length) continue;
+    keep.forEach(k => seen.add(k));
+    out.push(keep);
+  }
+  for (const e of entries) if (!seen.has(e.key)) out.push([e.key]);
+  return out;
+}
+
+function pieceCheck(ctx, entries, groups, failures, nPhotos) {
+  const { sheet, cfg, esc, db, state, uid, nowISO, localDate, logEvent, render, toast } = ctx;
+  const byKey = Object.fromEntries(entries.map(e => [e.key, e]));
+  const cards = groups.map((g, gi) => {
+    const members = g.map(k => byKey[k]);
+    const best = [...members].sort((a, b) => b.area - a.area)[0];
+    const counts = {};
+    members.forEach(m => (counts[m.category] = (counts[m.category] || 0) + 1));
+    const category = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+    const photos = new Set(members.map(m => m.photo)).size;
+    return { gi, members, best, category, photos, include: !!best.crop, url: best.crop ? URL.createObjectURL(best.crop) : null };
+  }).sort((a, b) => (b.include - a.include) || (b.photos - a.photos));
+  const opts = sel => Object.entries(cfg.categories).map(([k, c]) => `<option value="${k}" ${k === sel ? "selected" : ""}>${c.label}</option>`).join("");
+  const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+  sheet(`<div class="row"><h2>Found ${cards.length} garments in ${nPhotos} photos</h2></div>
+    <p class="small">Uncheck anything wrong. Items without a clear cut-out start unchecked; you can photograph them later.${failures.length ? ` ${failures.length} photo(s) could not be processed.` : ""}</p>
+    <div class="list">${cards.map(c => `<div class="li" style="align-items:flex-start;padding:8px 0">
+      <label style="display:flex;gap:12px;align-items:flex-start;flex:1;min-width:0">
+        <input type="checkbox" data-inc="${c.gi}" ${c.include ? "checked" : ""} style="width:24px;height:24px;margin-top:20px;flex:none">
+        <span class="tile" style="width:72px;flex:none"><span class="img">${c.url ? `<img alt="" src="${c.url}">` : '<span class="ph">No clear photo</span>'}</span></span>
+        <span style="display:flex;flex-direction:column;gap:4px;min-width:0">
+          <b style="font-size:15px">${esc(cap(c.best.color))} ${esc(cfg.categories[c.category].label.toLowerCase())}</b>
+          <span class="small">${esc(c.best.description)}</span>
+          <span class="small">In ${c.photos} photo${c.photos > 1 ? "s" : ""}</span>
+          <select data-cat="${c.gi}" style="min-height:36px">${opts(c.category)}</select>
+        </span></label></div>`).join("")}</div>
+    <label class="li" style="gap:12px"><span class="small">Also log these as worn on the photo dates</span><input type="checkbox" id="logdays" style="width:24px;height:24px"></label>
+    <button class="btn primary" id="add">Add selected items</button>`, (el, close) => {
+    el.querySelector("#add").onclick = async () => {
+      const chosen = cards.filter(c => el.querySelector(`[data-inc="${c.gi}"]`).checked);
+      const idByGroup = {};
+      for (const c of chosen) {
+        const category = el.querySelector(`[data-cat="${c.gi}"]`).value;
+        let photoId = null;
+        if (c.best.crop) { photoId = uid(); await db.put("photos", { id: photoId, original: c.best.crop, cutout: c.best.crop, createdAt: nowISO(), source: "bulk" }); }
+        const item = { id: uid(), category, name: cap(`${c.best.color} ${cfg.categories[category].label.toLowerCase()}`).slice(0, 60), description: c.best.description,
+          photoId, status: "clean", source: "bulk", createdAt: nowISO(), updatedAt: nowISO(), deletedAt: null };
+        await db.put("items", item); state.items.push(item); idByGroup[c.gi] = item.id;
+      }
+      let days = 0;
+      if (el.querySelector("#logdays").checked) {
+        const perDate = {};
+        for (const c of chosen) for (const m of c.members) {
+          const d = localDate(new Date(m.date));
+          (perDate[d] ||= new Set()).add(idByGroup[c.gi]);
+        }
+        for (const [d, ids] of Object.entries(perDate)) {
+          if (d >= localDate() || state.wears.some(w => w.date === d)) continue;
+          const w = { id: uid(), date: d, itemIds: [...ids], outerClosed: null, source: "bulk-photo-date", createdAt: nowISO(), updatedAt: nowISO() };
+          await db.put("wears", w); state.wears.push(w); days++;
+        }
+      }
+      await db.kvSet("suggest:" + localDate(), null);
+      logEvent("bulk_import_done", { found: cards.length, added: chosen.length, days });
+      cards.forEach(c => c.url && URL.revokeObjectURL(c.url));
+      close(); toast(`Added ${chosen.length} items${days ? `, ${days} days logged` : ""}`); render();
+    };
+  });
+}
