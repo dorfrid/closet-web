@@ -22,18 +22,33 @@ export function personalOffset(ratings, cfg) {
   return Math.max(-capC, Math.min(capC, sum));
 }
 
-// hourly: [{ time: "YYYY-MM-DDTHH:MM" (local), feelsC }]; window in local "HH:MM".
-export function summarizeWindow(hourly, date, leave, back) {
-  const inWin = hourly.filter(h => h.time.slice(0, 10) === date && h.time.slice(11, 16) >= leave.slice(0, 2) + ":00" && h.time.slice(11, 16) <= back);
+// Feels-like temperature, °C. Steadman apparent temperature (shade): AT = T + 0.33·e − 0.70·ws − 4.00,
+// e = vapour pressure (hPa) from humidity, ws = wind in m/s. Forecast wind is at 10 m; people walk at ~1.5 m
+// between buildings, so wind is scaled by cfg.feels.streetWindFactor, and wind chill is capped at maxChillC.
+// Without humidity or wind it returns the air temperature.
+export function feelsLike(tempC, rhPct, windKmh, cfg) {
+  if (tempC == null) return null;
+  if (rhPct == null || windKmh == null) return tempC;
+  const f = cfg.feels;
+  const e = (rhPct / 100) * 6.105 * Math.exp((17.27 * tempC) / (237.7 + tempC));
+  const ws = (windKmh / 3.6) * f.streetWindFactor;
+  const at = tempC + 0.33 * e - 0.7 * ws - 4.0;
+  return Math.round(Math.max(tempC - f.maxChillC, Math.min(tempC + f.maxHeatC, at)) * 10) / 10;
+}
+
+// hourly: [{ time: "YYYY-MM-DDTHH:MM" (local), tempC, rh, windKmh }]; window in local "HH:MM".
+// Decisions use feels-like; the screen shows air temperature (what forecasts quote) and feels-like when it differs.
+export function summarizeWindow(hourly, date, leave, back, cfg) {
+  const inWin = hourly.filter(h => h.time.slice(0, 10) === date && h.time.slice(11, 16) >= leave.slice(0, 2) + ":00" && h.time.slice(11, 16) <= back)
+    .map(h => ({ ...h, feelsC: feelsLike(h.tempC, h.rh, h.windKmh, cfg) }));
   if (!inWin.length) return null;
-  const vals = inWin.map(h => h.feelsC);
-  const pick = hh => { const m = inWin.find(h => h.time.slice(11, 13) === hh); return m ? m.feelsC : null; };
+  const at = hh => inWin.find(h => h.time.slice(11, 13) === hh) || null;
+  const pt = h => (h ? { tempC: h.tempC, feelsC: h.feelsC } : null);
+  const feels = inWin.map(h => h.feelsC), air = inWin.map(h => h.tempC);
   return {
-    minFeelsC: Math.min(...vals),
-    maxFeelsC: Math.max(...vals),
-    morningC: pick(leave.slice(0, 2)),
-    middayC: pick("13"),
-    eveningC: pick(back.slice(0, 2)),
+    minFeelsC: Math.min(...feels), maxFeelsC: Math.max(...feels),
+    minTempC: Math.min(...air), maxTempC: Math.max(...air),
+    morning: pt(at(leave.slice(0, 2))), midday: pt(at("13")), evening: pt(at(back.slice(0, 2))),
   };
 }
 

@@ -823,6 +823,103 @@
         3,
         5
       ]
+    },
+    {
+      "name": "feels-like: [T, RH, wind km/h] → calm mild, windy cool morning (chill capped), humid summer, missing data",
+      "fn": "feelsLike",
+      "input": [
+        [
+          13,
+          70,
+          0
+        ],
+        [
+          13,
+          70,
+          25
+        ],
+        [
+          6,
+          60,
+          60
+        ],
+        [
+          30,
+          70,
+          10
+        ],
+        [
+          21,
+          null,
+          10
+        ]
+      ],
+      "expected": [
+        12.5,
+        9.5,
+        2,
+        34.6,
+        21
+      ]
+    },
+    {
+      "name": "window: shows air temps, decides by feels-like",
+      "fn": "summarizeWindow",
+      "input": {
+        "date": "2026-11-10",
+        "leave": "07:30",
+        "back": "19:00",
+        "hourly": [
+          {
+            "time": "2026-11-10T06:00",
+            "tempC": 11,
+            "rh": 75,
+            "windKmh": 12
+          },
+          {
+            "time": "2026-11-10T07:00",
+            "tempC": 13,
+            "rh": 72,
+            "windKmh": 15
+          },
+          {
+            "time": "2026-11-10T13:00",
+            "tempC": 21,
+            "rh": 50,
+            "windKmh": 18
+          },
+          {
+            "time": "2026-11-10T19:00",
+            "tempC": 16,
+            "rh": 65,
+            "windKmh": 10
+          },
+          {
+            "time": "2026-11-11T07:00",
+            "tempC": 30,
+            "rh": 50,
+            "windKmh": 5
+          }
+        ]
+      },
+      "expected": {
+        "minFeelsC": 10.8,
+        "maxFeelsC": 19,
+        "minTempC": 13,
+        "maxTempC": 21,
+        "morning": {
+          "tempC": 13,
+          "feelsC": 10.8
+        },
+        "midday": {
+          "tempC": 21,
+          "feelsC": 19
+        },
+        "evening": {
+          "tempC": 16,
+          "feelsC": 14.7
+        }
+      }
     }
   ]
 }

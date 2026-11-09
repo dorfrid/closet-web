@@ -6,9 +6,9 @@ import { S } from "./strings.js";
 import { openBulk, DEFAULT_MODEL, pendingBulk, resumeBulk, discardBulk } from "./bulk.js";
 import { testKey } from "./claude.js";
 import * as gsync from "./sync.js";
-import { recommend, alternatives, personalOffset, summarizeWindow, starterProgress } from "../shared/engine.js";
+import { recommend, alternatives, personalOffset, summarizeWindow, starterProgress, feelsLike } from "../shared/engine.js";
 
-const APP_VERSION = "0.8.1", SCHEMA = 1, PLATFORM = "web";
+const APP_VERSION = "0.9.0", SCHEMA = 1, PLATFORM = "web";
 const DEFAULT_LOC = { lat: 32.08, lon: 34.78, city: "Tel Aviv" };
 let cfg, state = { tab: "today", items: [], wears: [], ratings: [], settings: null, forecast: null };
 const $ = s => document.querySelector(s);
@@ -43,7 +43,7 @@ async function saveSettings(patch) { state.settings = { ...state.settings, ...pa
 
 async function getForecast(force = false) {
   const f = state.forecast, s = state.settings;
-  const fresh = f && f.lat === s.lat && f.lon === s.lon && Date.now() - Date.parse(f.fetchedAt) < 3 * 3600e3;
+  const fresh = f && f.v === 2 && f.lat === s.lat && f.lon === s.lon && Date.now() - Date.parse(f.fetchedAt) < 3 * 3600e3;
   if (fresh && !force) return f;
   try {
     const nf = { ...(await fetchForecast(s.lat, s.lon)), lat: s.lat, lon: s.lon };
@@ -77,7 +77,7 @@ function tileHTML(item, meta, attrs = "") {
 // ---------- engine glue ----------
 const isWorkDay = (d = new Date()) => state.settings.workDays.includes(d.getDay());
 function engineInput(extra = {}) {
-  const w = state.forecast && summarizeWindow(state.forecast.hourly, localDate(), state.settings.leave, state.settings.back);
+  const w = state.forecast && state.forecast.v === 2 && summarizeWindow(state.forecast.hourly, localDate(), state.settings.leave, state.settings.back, cfg);
   return { items: state.items, window: w || { minFeelsC: 20, maxFeelsC: 24 }, windowKnown: !!w, offsetC: personalOffset(state.ratings, cfg), today: localDate(),
     wears: state.wears.map(x => ({ date: x.date, itemIds: x.itemIds })),
     constraints: { longPants: state.settings.longPantsAtWork && isWorkDay() }, ...extra };
@@ -165,7 +165,7 @@ async function renderTodayInner(m) {
   }
   const f = await getForecast();
   const sug = await todaySuggestion();
-  const w = f && summarizeWindow(f.hourly, localDate(), s.leave, s.back);
+  const w = f && f.v === 2 && summarizeWindow(f.hourly, localDate(), s.leave, s.back, cfg);
   const wornToday = state.wears.find(x => x.date === localDate());
   let outfitHTML = "";
   if (sug.status === "incomplete" && sug.missing?.includes("long pants"))
@@ -176,12 +176,13 @@ async function renderTodayInner(m) {
     const work = state.settings.longPantsAtWork && isWorkDay();
     outfitHTML = `<section class="card"><div class="row"><h2>Today's outfit</h2><span class="small">${work ? "Work day · long pants" : S.tapSwap}</span></div>
       <div class="grid2">${tiles}</div>
-      ${sug.shortfall > 0 ? `<p class="small warm">Your closet is short on warm layers for ${deg(sug.effC)}. Add a sweater or jacket.</p>` : ""}
+      ${sug.shortfall > 0 ? `<p class="small warm">Your closet is short on warm layers for a feels-like ${deg(sug.effC)}. Add a sweater or jacket.</p>` : ""}
       ${wornToday ? `<div class="row"><span class="acc">✓ ${S.loggedToday}</span><button class="link muted" id="unwear">${S.undo}</button></div>`
         : `<button class="btn primary" id="wear">${S.wearing}</button><button class="btn" id="another">${S.another}</button>`}</section>`;
   }
   const age = f ? (Date.now() - Date.parse(f.fetchedAt)) / 3600e3 : null;
-  const wx = w ? `<div class="wx"><span><b>${deg(w.minFeelsC)}–${deg(w.maxFeelsC)}</b> <span class="small">Morning <b class="cold">${deg(w.morningC)}</b> · Midday <b class="warm">${deg(w.middayC)}</b> · Evening <b class="cold">${deg(w.eveningC)}</b></span></span></div>`
+  const fl = p => (p && Math.abs(p.feelsC - p.tempC) >= cfg.feels.showFeelsDiffC ? ` <span class="small">(feels ${deg(p.feelsC)})</span>` : "");
+  const wx = w ? `<div class="wx"><span><b>${deg(w.minTempC)}–${deg(w.maxTempC)}</b> <span class="small">Morning <b class="cold">${deg(w.morning?.tempC)}</b>${fl(w.morning)} · Midday <b class="warm">${deg(w.midday?.tempC)}</b>${fl(w.midday)} · Evening <b class="cold">${deg(w.evening?.tempC)}</b>${fl(w.evening)}</span></span></div>`
     : `<div class="wx"><span class="small">No forecast yet</span><button class="link" id="refresh">${S.refresh}</button></div>`;
   const stale = age != null && age > 3 ? `<div class="wx"><span class="small">${S.offline(new Date(f.fetchedAt).toLocaleString("en-GB", { weekday: "short", hour: "2-digit", minute: "2-digit" }))}</span><button class="link" id="refresh">${S.refresh}</button></div>` : "";
   m.innerHTML = `${head}${outfitHTML}${wx}${stale}
@@ -264,7 +265,7 @@ async function openComfort() {
     })));
     el.querySelector("#save").onclick = async () => {
       let weather = null, lat = null, lon = null;
-      try { const f = await fetchForecast(s.lat, s.lon); weather = f.current; } catch {}
+      try { const f = await fetchForecast(s.lat, s.lon); weather = { ...f.current, feelsC: feelsLike(f.current.tempC, f.current.humidity, f.current.windKmh, cfg), feelsModel: "steadman-street-v1" }; } catch {}
       if (s.locSource !== "default") { lat = Math.round(s.lat * 100) / 100; lon = Math.round(s.lon * 100) / 100; }
       const rating = { id: uid(), ts: nowISO(), tz: tz(), sensation: r.sensation, preference: r.preference, place: r.place, minutesInPlace: r.minutes,
         outerState: r.outerState, itemIds: ids, clothesText: clothes, weather, lat, lon, source: "app", createdAt: nowISO(), updatedAt: nowISO() };

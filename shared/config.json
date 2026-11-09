@@ -43,6 +43,13 @@
     "capC": 3,
     "lastNRatings": 30
   },
+  "feels": {
+    "_comment": "Feels-like = Steadman apparent temperature (shade) with 10 m wind scaled to street level, and a cap on wind chill. Same formula on every platform.",
+    "streetWindFactor": 0.6,
+    "maxChillC": 4,
+    "maxHeatC": 8,
+    "showFeelsDiffC": 2
+  },
   "categories": {
     "tank": {
       "slot": "base",
