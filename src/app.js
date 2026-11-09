@@ -5,9 +5,10 @@ import { applyTokens } from "./tokens.js";
 import { S } from "./strings.js";
 import { openBulk, DEFAULT_MODEL, pendingBulk, resumeBulk, discardBulk } from "./bulk.js";
 import { testKey } from "./claude.js";
+import * as gsync from "./sync.js";
 import { recommend, alternatives, personalOffset, summarizeWindow, starterProgress } from "../shared/engine.js";
 
-const APP_VERSION = "0.7.3", SCHEMA = 1, PLATFORM = "web";
+const APP_VERSION = "0.8.0", SCHEMA = 1, PLATFORM = "web";
 const DEFAULT_LOC = { lat: 32.08, lon: 34.78, city: "Tel Aviv" };
 let cfg, state = { tab: "today", items: [], wears: [], ratings: [], settings: null, forecast: null };
 const $ = s => document.querySelector(s);
@@ -29,12 +30,16 @@ function logEvent(name, props = {}) {
 async function load() {
   [state.items, state.wears, state.ratings] = await Promise.all([db.all("items"), db.all("wears"), db.all("ratings")]);
   state.items = state.items.filter(i => !i.deletedAt);
-  state.settings = { workDays: [0, 1, 2, 3, 4], longPantsAtWork: false,
-    ...(await db.kvGet("settings", { leave: "07:30", back: "19:00", ...DEFAULT_LOC, locSource: "default", lastPlace: "Outside shade", lastMinutes: 20 })) };
+  state.wears = state.wears.filter(w => !w.deletedAt);
+  // Defaults always sit underneath, so a partial or older settings record (e.g. from another device) never breaks a screen.
+  state.settings = { workDays: [0, 1, 2, 3, 4], longPantsAtWork: false, leave: "07:30", back: "19:00", ...DEFAULT_LOC, locSource: "default",
+    lastPlace: "Outside shade", lastMinutes: 20, ...((await db.kvGet("settings", null)) || {}) };
+  if (typeof state.settings.lat !== "number" || typeof state.settings.lon !== "number") Object.assign(state.settings, DEFAULT_LOC, { locSource: "default" });
   state.forecast = await db.kvGet("forecast", null);
   state.apiKeySet = !!(await db.kvGet("anthropic", null))?.key;
+  if (state.settings.offsetResetAt) state.ratings = state.ratings.filter(r => r.ts > state.settings.offsetResetAt);
 }
-async function saveSettings(patch) { state.settings = { ...state.settings, ...patch }; await db.kvSet("settings", state.settings); }
+async function saveSettings(patch) { state.settings = { ...state.settings, ...patch, updatedAt: nowISO() }; await db.kvSet("settings", state.settings); scheduleSync(); }
 
 async function getForecast(force = false) {
   const f = state.forecast, s = state.settings;
@@ -121,7 +126,7 @@ async function render() {
   if (state.tab === "today") await renderToday(m);
   else if (state.tab === "closet") renderCloset(m);
   else if (state.tab === "history") renderHistory(m);
-  else if (state.tab === "settings") renderSettings(m);
+  else if (state.tab === "settings") await renderSettings(m);
   hydrateImages(m);
 }
 
@@ -185,7 +190,7 @@ async function renderTodayInner(m) {
   m.querySelectorAll("[data-slot]").forEach(b => (b.onclick = () => openSwap(sug, b.dataset.slot)));
   $("#wear") && ($("#wear").onclick = () => wear(sug));
   $("#another") && ($("#another").onclick = another);
-  $("#unwear") && ($("#unwear").onclick = async () => { await db.del("wears", wornToday.id); state.wears = state.wears.filter(x => x.id !== wornToday.id); logEvent("wear_undone"); render(); });
+  $("#unwear") && ($("#unwear").onclick = async () => { await db.put("wears", { ...wornToday, deletedAt: nowISO(), updatedAt: nowISO() }); state.wears = state.wears.filter(x => x.id !== wornToday.id); logEvent("wear_undone"); render(); });
   $("#refresh") && ($("#refresh").onclick = async () => { await getForecast(true); await todaySuggestion(true); render(); });
   $("#rate").onclick = openComfort;
   $("#setloc") && ($("#setloc").onclick = () => setTab("settings"));
@@ -351,7 +356,7 @@ async function openItem(id) {
           msg.textContent = `${S.removingBg} downloading the model ${Math.round(f * 100)}%`;
         });
         clearInterval(tick);
-        await db.put("photos", p); delete urlCache[p.id + ":c"];
+        p.updatedAt = nowISO(); await db.put("photos", p); delete urlCache[p.id + ":c"];
         logEvent("background_removed", { ok: true, ms: Math.round(performance.now() - t0) });
         msg.textContent = "Done."; hydrateImages(el);
       } catch (e) { clearInterval(tick); console.warn(e); logEvent("background_removed", { ok: false, error: String(e.message || e).slice(0, 80) }); msg.textContent = "Could not remove the background. The original photo is kept. (" + String(e.message || e).slice(0, 120) + ")"; }
@@ -397,8 +402,67 @@ function renderHistory(m) {
   }));
 }
 
+// ---------- Sync (Google Drive) ----------
+let syncTimer = null, syncMsg = "";
+function scheduleSync(delay = 8000) { clearTimeout(syncTimer); syncTimer = setTimeout(() => runSync({ quiet: true }), delay); }
+const ago = iso => { if (!iso) return "never"; const m = Math.round((Date.now() - Date.parse(iso)) / 60e3); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" }); };
+function syncLine(msg) { const el = document.querySelector("#syncst"); if (el) el.textContent = msg; }
+async function runSync({ quiet = false } = {}) {
+  const st = await gsync.syncState();
+  if (!st.connected) return;
+  if (!st.token || Date.now() > st.exp - 60e3) { if (!quiet) await gsync.signIn({ silent: !st.needsConsent }); return; }
+  if (!navigator.onLine) { if (!quiet) toast("Offline. Sync will run when you are back online."); return; }
+  try {
+    const r = await gsync.sync({ onProgress: t => { syncMsg = t; syncLine(t); } });
+    syncMsg = "";
+    logEvent("sync_done", { changedLocal: r.changedLocal, uploaded: r.uploaded, items: r.items, photos: r.photos });
+    if (r.changedLocal) { await load(); await db.kvSet("suggest:" + localDate(), null); for (const k in urlCache) delete urlCache[k]; }
+    if (r.changedLocal || state.tab === "settings") render();
+    if (!quiet) toast(r.changedLocal ? `Synced · ${r.changedLocal} changes from your other devices` : r.uploaded ? "Synced · saved to Google Drive" : "Synced · everything is up to date");
+  } catch (e) {
+    syncMsg = "";
+    logEvent("sync_failed", { error: String(e.message || e).slice(0, 80) });
+    if (!quiet) toast("Sync failed: " + e.message);
+    if (state.tab === "settings") render();
+  }
+}
+async function syncSection() {
+  const st = await gsync.syncState(), cid = await gsync.clientId();
+  if (!cid) return `<div class="li"><span class="small">Paste the Google OAuth Client ID once (it is public, not a password).</span></div>
+      <div class="li"><input id="gcid" placeholder="…apps.googleusercontent.com" autocomplete="off" style="flex:1"><button class="link" id="gcidsave">Save</button></div>`;
+  if (!st.connected) return `<div class="li"><span class="small">Keep this phone and your computer in sync through a hidden app folder in your own Google Drive. Only this app can see it.</span></div>
+      <div class="li"><span>Google Drive</span><button class="link" id="gconnect">Connect</button></div>`;
+  const status = syncMsg || (st.needsConsent ? "Sign in again to keep syncing" : st.lastError ? "Last try failed: " + st.lastError : `Last synced ${ago(st.lastSync)}${st.lastResult ? ` · ${st.lastResult.items} items · ${st.lastResult.photos} photos` : ""}`);
+  return `<div class="li"><span>Google Drive</span><span class="small" id="syncst">${esc(status)}</span></div>
+      <div class="li"><span>${st.needsConsent ? "Reconnect" : "Sync now"}</span><button class="link" id="gsync">${st.needsConsent ? "Reconnect" : "Sync"}</button></div>
+      <div class="li"><span>Stop syncing this device</span><button class="link muted" id="gdisc">Disconnect</button></div>
+      <div class="li"><span class="warm">Remove the copy in Google Drive</span><button class="link" id="gwipe" style="color:var(--warm)">Remove</button></div>`;
+}
+function wireSync() {
+  $("#gcidsave") && ($("#gcidsave").onclick = async () => {
+    const v = $("#gcid").value.trim();
+    if (!/^[\w-]+\.apps\.googleusercontent\.com$/.test(v)) { toast("That does not look like a Google Client ID"); return; }
+    await gsync.saveClientId(v); render();
+  });
+  $("#gconnect") && ($("#gconnect").onclick = () => gsync.signIn().catch(e => toast(e.message)));
+  $("#gsync") && ($("#gsync").onclick = async () => {
+    const st = await gsync.syncState();
+    if (st.needsConsent) return gsync.signIn();
+    syncLine("Syncing…"); runSync();
+  });
+  $("#gdisc") && ($("#gdisc").onclick = async () => {
+    if (!confirm("Stop syncing this device? Your data stays here and in Google Drive.")) return;
+    await gsync.disconnect(); logEvent("sync_disconnected"); render();
+  });
+  $("#gwipe") && ($("#gwipe").onclick = async () => {
+    if (!confirm("Delete the synced copy from Google Drive? Data on this device stays. Other devices keep their own copy until they sync again, which re-uploads it.")) return;
+    try { const n = await gsync.wipeRemote(); toast(`Removed ${n} files from Google Drive`); render(); } catch (e) { toast(e.message); }
+  });
+}
+
 // ---------- Settings ----------
-function renderSettings(m) {
+async function renderSettings(m) {
+  const syncHTML = await syncSection();
   const s = state.settings, off = personalOffset(state.ratings, cfg);
   m.innerHTML = `<button class="link" id="back" style="align-self:flex-start">‹ ${S.closet}</button><h1>${S.settings}</h1>
     <div class="sub">YOUR DAY</div><section class="card list">
@@ -414,7 +478,8 @@ function renderSettings(m) {
       <div class="li"><span>Anthropic API key</span><span class="row"><span class="small" id="keyst">${state.apiKeySet ? "Saved on this phone" : "Not set"}</span></span></div>
       <div class="li"><input type="password" id="apikey" placeholder="sk-ant-…" autocomplete="off" style="flex:1"><button class="link" id="savekey">Save</button></div>
       <div class="li"><span class="small">Use a dedicated workspace key with a low monthly limit. Only face-hidden photos are sent.</span>${state.apiKeySet ? '<button class="link muted" id="delkey">Remove</button>' : ""}</div></section>
-    <div class="sub">YOUR DATA (stays on this phone)</div><section class="card list">
+    <div class="sub">SYNC ACROSS DEVICES</div><section class="card list">${syncHTML}</section>
+    <div class="sub">YOUR DATA</div><section class="card list">
       <div class="li"><span>${S.export}</span><button class="link" id="ex">Export</button></div>
       <div class="li"><span>${S.import}</span><label class="link" style="display:flex;align-items:center">Import<input type="file" id="im" accept="application/json,.json" class="hidden"></label></div>
       <div class="li"><span class="warm">${S.deleteAll}</span><button class="link" id="da" style="color:var(--warm)">Delete</button></div></section>
@@ -444,11 +509,14 @@ function renderSettings(m) {
     catch (e) { $("#keyst").textContent = "Not saved"; toast(e.message); }
   };
   $("#delkey") && ($("#delkey").onclick = async () => { await db.del("kv", "anthropic"); state.apiKeySet = false; render(); });
+  wireSync();
   $("#ex").onclick = exportAll;
   $("#im").onchange = e => importAll(e.target.files[0]);
   $("#da").onclick = async () => {
-    if (!confirm("Delete all items, photos, history and ratings from this phone? This cannot be undone. Export first if you want a copy.")) return;
+    if (!confirm("Delete all items, photos, history and ratings from this device? This cannot be undone here. Sync is turned off for this device; the Google Drive copy, if any, is kept until you remove it.")) return;
+    const cid = (await gsync.syncState()).clientId || "";
     for (const st of db.STORES) await db.clear(st);
+    if (cid) await db.kvSet("gdrive", { connected: false, clientId: cid });
     location.reload();
   };
 }
@@ -471,7 +539,7 @@ async function importAll(file) {
     const toBlob = async d => (d ? (await fetch(d)).blob() : null);
     for (const p of j.photos || []) await db.put("photos", { id: p.id, createdAt: p.createdAt, original: await toBlob(p.original), cutout: await toBlob(p.cutout) });
     for (const st of ["items", "wears", "ratings", "events"]) for (const r of j[st] || []) await db.put(st, r);
-    if (j.settings) await db.kvSet("settings", j.settings);
+    if (j.settings) await db.kvSet("settings", { ...j.settings, updatedAt: j.settings.updatedAt || nowISO() });
     toast("Imported"); await load(); render();
   } catch (e) { toast("Import failed: " + e.message); }
 }
@@ -480,13 +548,23 @@ async function importAll(file) {
 async function boot() {
   await applyTokens();
   cfg = await (await fetch("./shared/config.json")).json();
+  const back = await gsync.handleRedirect().catch(() => null);
   await load();
-  if (state.settings.offsetResetAt) state.ratings = state.ratings.filter(r => r.ts > state.settings.offsetResetAt);
+  if (!back && await gsync.renewIfNeeded().catch(() => false)) return; // a quick hop to Google to renew the 1-hour sync token
   db.persist();
   document.querySelectorAll("nav.tabs button").forEach(b => (b.onclick = () => setTab(b.dataset.tab)));
   logEvent("app_open", { source: new URLSearchParams(location.search).get("src") || "icon" });
   if (new URLSearchParams(location.search).get("rate") === "1") setTimeout(openComfort, 300);
   render();
+  db.setOnWrite(() => scheduleSync());
+  runSync({ quiet: back !== "connected" });
+  document.addEventListener("visibilitychange", async () => {
+    if (document.visibilityState !== "visible") return;
+    const st = await gsync.syncState();
+    if (!st.connected) return;
+    if (st.token && Date.now() < st.exp - 60e3) { if (Date.now() - Date.parse(st.lastSync || 0) > 120e3) runSync({ quiet: true }); }
+    else if (!document.querySelector(".scrim")) gsync.renewIfNeeded().catch(() => {});
+  });
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
 }
 boot();

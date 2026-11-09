@@ -21,10 +21,15 @@ async function tx(store, mode, fn) {
     t.onerror = () => rej(t.error);
   });
 }
-export const put = (store, obj) => tx(store, "readwrite", s => s.put(obj));
+// Change hook for sync: fires after writes to synced stores (not kv, not the high-volume event log).
+let onWrite = null, muted = false;
+export function setOnWrite(f) { onWrite = f; }
+export function mute(v) { muted = v; }
+const touched = store => { if (onWrite && !muted && store !== "kv" && store !== "events") onWrite(store); };
+export const put = (store, obj) => tx(store, "readwrite", s => s.put(obj)).then(r => (touched(store), r));
 export const get = (store, id) => tx(store, "readonly", s => s.get(id));
 export const all = (store) => tx(store, "readonly", s => s.getAll());
-export const del = (store, id) => tx(store, "readwrite", s => s.delete(id));
+export const del = (store, id) => tx(store, "readwrite", s => s.delete(id)).then(r => (touched(store), r));
 export const clear = (store) => tx(store, "readwrite", s => s.clear());
 export async function kvGet(k, dflt) { const r = await get("kv", k); return r ? r.value : dflt; }
 export const kvSet = (k, value) => put("kv", { id: k, value });
