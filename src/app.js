@@ -7,7 +7,7 @@ import { openBulk, DEFAULT_MODEL, pendingBulk, resumeBulk, discardBulk } from ".
 import { testKey } from "./claude.js";
 import { recommend, alternatives, personalOffset, summarizeWindow, starterProgress } from "../shared/engine.js";
 
-const APP_VERSION = "0.7.0", SCHEMA = 1, PLATFORM = "web";
+const APP_VERSION = "0.7.1", SCHEMA = 1, PLATFORM = "web";
 const DEFAULT_LOC = { lat: 32.08, lon: 34.78, city: "Tel Aviv" };
 let cfg, state = { tab: "today", items: [], wears: [], ratings: [], settings: null, forecast: null };
 const $ = s => document.querySelector(s);
@@ -338,14 +338,14 @@ async function openItem(id) {
     el.querySelector("#st").onclick = e => e.target.setAttribute("aria-pressed", String(e.target.getAttribute("aria-pressed") !== "true"));
     el.querySelector("#bg").onclick = async () => {
       const p = await db.get("photos", it.photoId), msg = el.querySelector("#bgp");
-      msg.classList.remove("hidden"); msg.textContent = S.removingBg + " First time downloads the model (about 40 MB).";
+      msg.classList.remove("hidden"); msg.textContent = S.removingBg + " First time downloads the model (about 45 MB).";
       const t0 = performance.now();
       try {
-        p.cutout = await removeBackground(p.original, (k, f) => (msg.textContent = `${S.removingBg} ${Math.round(f * 100)}%`));
+        p.cutout = await removeBackground(p.original, (k, f) => (msg.textContent = `${S.removingBg} downloading ${Math.round(f * 100)}%`));
         await db.put("photos", p); delete urlCache[p.id + ":c"];
         logEvent("background_removed", { ok: true, ms: Math.round(performance.now() - t0) });
         msg.textContent = "Done."; hydrateImages(el);
-      } catch (e) { logEvent("background_removed", { ok: false }); msg.textContent = "Could not remove the background. The original photo is kept."; }
+      } catch (e) { console.warn(e); logEvent("background_removed", { ok: false, error: String(e.message || e).slice(0, 80) }); msg.textContent = "Could not remove the background. The original photo is kept. (" + String(e.message || e).slice(0, 120) + ")"; }
     };
     el.querySelector("#sv").onclick = async () => {
       Object.assign(it, { name: el.querySelector("#nm").value.trim().slice(0, 60), category: el.querySelector("#cat").value,

@@ -13,14 +13,25 @@ export async function normalize(file) {
   return c.convertToBlob({ type: "image/jpeg", quality: 0.85 });
 }
 
-// Background removal adapter. Web: in-browser model, loaded only when first used (large download).
-// iOS: Vision foreground mask. Android: ML Kit subject segmentation.
-let lib;
+// Background removal adapter. Web: ORMBG (Apache-2.0, int8 ≈ 44 MB) via Transformers.js, downloaded on first use
+// and cached. iOS: Vision foreground mask. Android: ML Kit subject segmentation.
+const TF_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
+let bgP;
 export async function removeBackground(blob, onProgress) {
-  if (!lib) lib = await import("https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/+esm");
-  const out = await lib.removeBackground(blob, {
-    output: { format: "image/png" },
-    progress: (key, cur, total) => onProgress?.(key, total ? cur / total : 0),
-  });
-  return out;
+  bgP ||= (async () => {
+    const tf = await import(TF_URL);
+    return tf.pipeline("background-removal", "onnx-community/ormbg-ONNX", { dtype: "int8", device: "wasm",
+      progress_callback: p => { if (p.status === "progress" && p.total) onProgress?.("download", p.loaded / p.total); } });
+  })();
+  let seg;
+  try { seg = await bgP; } catch (e) { bgP = null; throw e; }
+  const url = URL.createObjectURL(blob);
+  try {
+    const out = await seg(url);
+    const img = Array.isArray(out) ? out[0] : out;
+    const c = document.createElement("canvas");
+    c.width = img.width; c.height = img.height;
+    c.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(img.rgba().data), img.width, img.height), 0, 0);
+    return await new Promise(r => c.toBlob(r, "image/png"));
+  } finally { URL.revokeObjectURL(url); }
 }
