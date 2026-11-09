@@ -7,7 +7,7 @@ import { openBulk, DEFAULT_MODEL, pendingBulk, resumeBulk, discardBulk } from ".
 import { testKey } from "./claude.js";
 import { recommend, alternatives, personalOffset, summarizeWindow, starterProgress } from "../shared/engine.js";
 
-const APP_VERSION = "0.6.1", SCHEMA = 1, PLATFORM = "web";
+const APP_VERSION = "0.6.2", SCHEMA = 1, PLATFORM = "web";
 const DEFAULT_LOC = { lat: 32.08, lon: 34.78, city: "Tel Aviv" };
 let cfg, state = { tab: "today", items: [], wears: [], ratings: [], settings: null, forecast: null };
 const $ = s => document.querySelector(s);

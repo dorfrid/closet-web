@@ -1,10 +1,12 @@
 // Bulk import from photos of you wearing clothes.
 // Phone: strip metadata, hide faces, cut garments. Cloud (your key): label + match garments. You: confirm in one list.
 import { normalize } from "./images.js";
-import { loadSegmenter, blobToCanvas, parseClothes, hideFaces, cutRegion } from "./vision.js";
+import { loadSegmenter, blobToCanvas, parseClothes, hideFaces, cutRegion, isolateMainPerson } from "./vision.js";
 import { labelPhoto, matchGarments } from "./claude.js";
 
-const MAX_PHOTOS = 30;
+// Phones have far less memory for the model than computers.
+const MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
+const MAX_PHOTOS = MOBILE ? 30 : 60;
 export const DEFAULT_MODEL = "claude-sonnet-5-5";
 
 export async function openBulk(ctx) {
@@ -19,6 +21,7 @@ export async function openBulk(ctx) {
   sheet(`<h2>Import from your photos</h2>
     <p class="small">Pick up to ${MAX_PHOTOS} photos of you wearing clothes. On this phone: location data is removed, faces are hidden, and each garment is cut out.
     Only the face-hidden photo is sent to Claude to name and match the garments. Your original photos are not stored in the app.</p>
+    <p class="small">Group photos are fine: the app keeps the largest person and greys out everyone else before anything is sent. Check those items in the review.</p>
     <p class="small">First run downloads the clothes model (about 30 MB). Wi-Fi recommended. If the app closes midway, finished photos are kept and you can review them.</p>
     <label class="btn primary">Choose photos<input id="bulk" type="file" accept="image/*" multiple class="hidden"></label>`, (el, close) => {
     el.querySelector("#bulk").onchange = e => {
@@ -52,6 +55,7 @@ async function run(ctx, files, api) {
         say(`Photo ${i + 1} of ${files.length}: hiding faces`, base);
         const canvas = await blobToCanvas(await normalize(files[i]));
         const parsed = await parseClothes(canvas);
+        const people = isolateMainPerson(canvas, parsed);
         if ((await hideFaces(canvas, parsed)) < 0) { failures.push({ photo: i + 1, error: "No person found" }); canvas.width = 0; continue; }
         say(`Photo ${i + 1} of ${files.length}: naming garments`, base + 0.35 / files.length);
         const b64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
@@ -64,7 +68,7 @@ async function run(ctx, files, api) {
           const region = slot === "bottom" ? "lower" : slot === "shoes" ? "shoes" : g.outermost ? "upper" : null;
           const cut = region ? cuts[region] : null;
           entries.push({ key: `p${i}g${j}`, photo: i, date: files[i].lastModified, category: g.category, color: g.color || "", description: g.description || "",
-            visibility: g.visibility, crop: cut?.blob || null, area: cut?.area || 0 });
+            visibility: g.visibility, crop: cut?.blob || null, area: cut?.area || 0, group: people > 1 });
         });
         canvas.width = 0; // free memory before the next photo
         await ctx.db.kvSet(SESSION, { startedAt: new Date().toISOString(), total: files.length, done: i + 1, entries });
@@ -146,6 +150,7 @@ function pieceCheck(ctx, entries, groups, failures, nPhotos) {
           <b style="font-size:15px">${esc(cap(c.best.color))} ${esc(cfg.categories[c.category].label.toLowerCase())}</b>
           <span class="small">${esc(c.best.description)}</span>
           <span class="small">In ${c.photos} photo${c.photos > 1 ? "s" : ""}</span>
+          ${c.members.every(m => m.group) ? '<span class="small warm">Only seen in group photos: make sure it is yours</span>' : ""}
           <select data-cat="${c.gi}" style="min-height:36px">${opts(c.category)}</select>
         </span></label></div>`).join("")}</div>
     <label class="li" style="gap:12px"><span class="small">Also log these as worn on the photo dates</span><input type="checkbox" id="logdays" style="width:24px;height:24px"></label>

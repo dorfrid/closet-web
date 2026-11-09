@@ -37,6 +37,14 @@ export async function parseClothes(canvas) {
   const out = await seg(canvas.toDataURL("image/jpeg", 0.9));
   const w = canvas.width, h = canvas.height;
   const masks = {};
+  // Every non-background pixel = a person (any person in the photo).
+  const person = new Uint8Array(w * h);
+  for (const o of out) {
+    if (o.label === "Background") continue;
+    const mk = o.mask.width === w && o.mask.height === h ? o.mask : await o.mask.resize(w, h);
+    for (let i = 0; i < person.length; i++) if (mk.data[i * mk.channels] > 127) person[i] = 1;
+  }
+  masks.person = person;
   for (const [g, labels] of Object.entries(GROUPS)) {
     let m = null;
     for (const o of out) {
@@ -75,13 +83,63 @@ export async function hideFaces(canvas, parsed) {
   const W = parsed.width, H = parsed.height, regions = [];
   const up = parsed.masks.upper && bbox(parsed.masks.upper, W, H);
   const lo = parsed.masks.lower && bbox(parsed.masks.lower, W, H);
-  const fb = parsed.masks.face && bbox(parsed.masks.face, W, H);
+  // Face/hair box from the largest face part only; stray "hair/hat" pixels elsewhere must not blow it up.
+  let fb = parsed.masks.face && bbox(cleanMask(parsed.masks.face, W, H, 0.3), W, H);
+  if (fb && up && fb.y1 > up.y0 + (up.y1 - up.y0) * 0.35) fb = null; // implausible: reaches deep into the torso
   if (fb) { const bw = fb.x1 - fb.x0, bh = fb.y1 - fb.y0; regions.push({ x: fb.x0 - bw * 0.25, y: fb.y0 - bh * 0.25, w: bw * 1.5, h: bh * 1.5 }); }
   if (up) regions.push({ x: 0, y: 0, w: W, h: up.y0 });
   else if (!fb && !lo) return -1;
   for (const r of regions) pixelate(ctx, r.x, r.y, r.w, r.h);
   parsed.hidden = regions;
   return regions.length;
+}
+
+function components(src, w, h) {
+  const lab = new Int32Array(w * h), sizes = [0], q = new Int32Array(w * h);
+  for (let i = 0; i < src.length; i++) {
+    if (!src[i] || lab[i]) continue;
+    const id = sizes.length; let head = 0, tail = 0, n = 0;
+    q[tail++] = i; lab[i] = id;
+    while (head < tail) {
+      const p = q[head++]; n++;
+      const x = p % w, y = (p / w) | 0;
+      for (const np of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, y > 0 ? p - w : -1, y < h - 1 ? p + w : -1])
+        if (np >= 0 && src[np] && !lab[np]) { lab[np] = id; q[tail++] = np; }
+    }
+    sizes.push(n);
+  }
+  return { lab, sizes };
+}
+
+// Several people in one photo: keep the largest person, blank everyone else and everything outside that
+// person's area (also protects other people's privacy). Restricts all masks to that person.
+// Returns the number of people found (1 = alone).
+export function isolateMainPerson(canvas, parsed) {
+  const W = parsed.width, H = parsed.height, pm = parsed.masks.person;
+  if (!pm) return 0;
+  const { lab, sizes } = components(pm, W, H);
+  let main = 0;
+  for (let i = 1; i < sizes.length; i++) if (!main || sizes[i] > sizes[main]) main = i;
+  if (!main || sizes[main] < W * H * 0.02) return 0;
+  const people = sizes.filter((n, i) => i > 0 && n >= sizes[main] * 0.2).length;
+  let x0 = W, y0 = H, x1 = 0, y1 = 0;
+  for (let i = 0; i < lab.length; i++) if (lab[i] === main) { const x = i % W, y = (i / W) | 0; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  const mx = (x1 - x0) * 0.08, my = (y1 - y0) * 0.05;
+  x0 = Math.max(0, x0 - mx); x1 = Math.min(W - 1, x1 + mx); y0 = Math.max(0, y0 - my); y1 = Math.min(H - 1, y1 + my);
+  const ctx = canvas.getContext("2d"), img = ctx.getImageData(0, 0, W, H), d = img.data;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x;
+    const other = lab[i] && lab[i] !== main;
+    if (other || x < x0 || x > x1 || y < y0 || y > y1) { d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = 128; }
+  }
+  ctx.putImageData(img, 0, 0);
+  for (const k of Object.keys(parsed.masks)) {
+    const m = parsed.masks[k];
+    if (!m) continue;
+    for (let i = 0; i < m.length; i++) if (lab[i] !== main) m[i] = 0;
+  }
+  parsed.people = people;
+  return people;
 }
 
 // Keeps connected parts that are at least 15% of the largest part (drops stray pixels; keeps both shoes).

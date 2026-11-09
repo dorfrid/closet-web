@@ -26,7 +26,7 @@ export async function testKey(key, model) {
 
 // Returns { garments: [{ category, color, description, visibility: "full"|"partial"|"hidden", outermost: bool }] }
 export async function labelPhoto(key, model, jpegBase64, categories) {
-  const prompt = `This photo shows one man wearing clothes. Faces are hidden on purpose.
+  const prompt = `This photo shows a man wearing clothes. Faces are hidden on purpose, and any other people have been greyed out. Describe only the main, fully colored person.
 List every garment he wears that is at least partly visible. Ignore accessories, bags, watches and anything not worn.
 Return only JSON: {"garments":[{"category":"<one of: ${categories.join(", ")}>","color":"<plain color>","description":"<short, distinguishing details: fabric, pattern, logo, pockets, fit>","visibility":"full|partial|hidden","outermost":true|false}]}
 "outermost" = true for the top garment that covers the upper body from the outside (only one upper garment can be outermost); true for bottoms and shoes.
