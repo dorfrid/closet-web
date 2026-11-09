@@ -1,0 +1,9 @@
+// Runs the shared golden tests against the JS engine: node --test shared/
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { recommend, personalOffset, requiredWarmth } from "./engine.js";
+const cfg = JSON.parse(readFileSync(new URL("./config.json", import.meta.url)));
+const golden = JSON.parse(readFileSync(new URL("./golden-tests.json", import.meta.url)));
+const fns = { recommend: i => recommend(i, cfg), personalOffset: i => personalOffset(i, cfg), requiredWarmth: i => i.map(t => requiredWarmth(t, cfg)) };
+for (const c of golden.cases) test(c.name, () => assert.deepEqual(fns[c.fn](c.input), c.expected));

@@ -1,0 +1,508 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "name": "cool evening 18C, no offset: tee + light jacket, open",
+      "fn": "recommend",
+      "input": {
+        "items": [
+          {
+            "id": "tee-white",
+            "category": "tee"
+          },
+          {
+            "id": "tee-black",
+            "category": "tee"
+          },
+          {
+            "id": "ls-grey",
+            "category": "longsleeve"
+          },
+          {
+            "id": "sweat-grey",
+            "category": "sweatshirt"
+          },
+          {
+            "id": "lj-navy",
+            "category": "lightjacket"
+          },
+          {
+            "id": "jacket-olive",
+            "category": "jacket"
+          },
+          {
+            "id": "jeans-dark",
+            "category": "jeans"
+          },
+          {
+            "id": "pants-warm",
+            "category": "warmpants"
+          },
+          {
+            "id": "sneakers-white",
+            "category": "sneakers"
+          },
+          {
+            "id": "boots-brown",
+            "category": "boots"
+          }
+        ],
+        "window": {
+          "minFeelsC": 18,
+          "maxFeelsC": 21
+        },
+        "offsetC": 0,
+        "today": "2026-11-09",
+        "wears": []
+      },
+      "expected": {
+        "status": "ok",
+        "effC": 18,
+        "requiredWarmth": 3,
+        "upperWarmth": 3,
+        "outfit": {
+          "base": "tee-black",
+          "mid": null,
+          "outer": "lj-navy",
+          "bottom": "jeans-dark",
+          "shoes": "boots-brown"
+        },
+        "outerClosed": false,
+        "shortfall": 0
+      }
+    },
+    {
+      "name": "same evening with -0.5 offset: jacket closed",
+      "fn": "recommend",
+      "input": {
+        "items": [
+          {
+            "id": "tee-white",
+            "category": "tee"
+          },
+          {
+            "id": "tee-black",
+            "category": "tee"
+          },
+          {
+            "id": "ls-grey",
+            "category": "longsleeve"
+          },
+          {
+            "id": "sweat-grey",
+            "category": "sweatshirt"
+          },
+          {
+            "id": "lj-navy",
+            "category": "lightjacket"
+          },
+          {
+            "id": "jacket-olive",
+            "category": "jacket"
+          },
+          {
+            "id": "jeans-dark",
+            "category": "jeans"
+          },
+          {
+            "id": "pants-warm",
+            "category": "warmpants"
+          },
+          {
+            "id": "sneakers-white",
+            "category": "sneakers"
+          },
+          {
+            "id": "boots-brown",
+            "category": "boots"
+          }
+        ],
+        "window": {
+          "minFeelsC": 18,
+          "maxFeelsC": 21
+        },
+        "offsetC": -0.5,
+        "today": "2026-11-09",
+        "wears": []
+      },
+      "expected": {
+        "status": "ok",
+        "effC": 17.5,
+        "requiredWarmth": 3,
+        "upperWarmth": 3,
+        "outfit": {
+          "base": "tee-black",
+          "mid": null,
+          "outer": "lj-navy",
+          "bottom": "jeans-dark",
+          "shoes": "boots-brown"
+        },
+        "outerClosed": true,
+        "shortfall": 0
+      }
+    },
+    {
+      "name": "warm day 25C: tee only",
+      "fn": "recommend",
+      "input": {
+        "items": [
+          {
+            "id": "tee-white",
+            "category": "tee"
+          },
+          {
+            "id": "tee-black",
+            "category": "tee"
+          },
+          {
+            "id": "ls-grey",
+            "category": "longsleeve"
+          },
+          {
+            "id": "sweat-grey",
+            "category": "sweatshirt"
+          },
+          {
+            "id": "lj-navy",
+            "category": "lightjacket"
+          },
+          {
+            "id": "jacket-olive",
+            "category": "jacket"
+          },
+          {
+            "id": "jeans-dark",
+            "category": "jeans"
+          },
+          {
+            "id": "pants-warm",
+            "category": "warmpants"
+          },
+          {
+            "id": "sneakers-white",
+            "category": "sneakers"
+          },
+          {
+            "id": "boots-brown",
+            "category": "boots"
+          }
+        ],
+        "window": {
+          "minFeelsC": 25,
+          "maxFeelsC": 29
+        },
+        "offsetC": 0,
+        "today": "2026-11-09",
+        "wears": []
+      },
+      "expected": {
+        "status": "ok",
+        "effC": 25,
+        "requiredWarmth": 1,
+        "upperWarmth": 1,
+        "outfit": {
+          "base": "tee-black",
+          "mid": null,
+          "outer": null,
+          "bottom": "jeans-dark",
+          "shoes": "sneakers-white"
+        },
+        "outerClosed": null,
+        "shortfall": 0
+      }
+    },
+    {
+      "name": "cold 9C: warmth 6, warm pants, jacket closed",
+      "fn": "recommend",
+      "input": {
+        "items": [
+          {
+            "id": "tee-white",
+            "category": "tee"
+          },
+          {
+            "id": "tee-black",
+            "category": "tee"
+          },
+          {
+            "id": "ls-grey",
+            "category": "longsleeve"
+          },
+          {
+            "id": "sweat-grey",
+            "category": "sweatshirt"
+          },
+          {
+            "id": "lj-navy",
+            "category": "lightjacket"
+          },
+          {
+            "id": "jacket-olive",
+            "category": "jacket"
+          },
+          {
+            "id": "jeans-dark",
+            "category": "jeans"
+          },
+          {
+            "id": "pants-warm",
+            "category": "warmpants"
+          },
+          {
+            "id": "sneakers-white",
+            "category": "sneakers"
+          },
+          {
+            "id": "boots-brown",
+            "category": "boots"
+          }
+        ],
+        "window": {
+          "minFeelsC": 9,
+          "maxFeelsC": 12
+        },
+        "offsetC": 0,
+        "today": "2026-11-09",
+        "wears": []
+      },
+      "expected": {
+        "status": "ok",
+        "effC": 9,
+        "requiredWarmth": 6,
+        "upperWarmth": 6,
+        "outfit": {
+          "base": "ls-grey",
+          "mid": "sweat-grey",
+          "outer": "lj-navy",
+          "bottom": "pants-warm",
+          "shoes": "boots-brown"
+        },
+        "outerClosed": true,
+        "shortfall": 0
+      }
+    },
+    {
+      "name": "recency: white tee worn yesterday, black tee chosen",
+      "fn": "recommend",
+      "input": {
+        "items": [
+          {
+            "id": "tee-white",
+            "category": "tee"
+          },
+          {
+            "id": "tee-black",
+            "category": "tee"
+          },
+          {
+            "id": "ls-grey",
+            "category": "longsleeve"
+          },
+          {
+            "id": "sweat-grey",
+            "category": "sweatshirt"
+          },
+          {
+            "id": "lj-navy",
+            "category": "lightjacket"
+          },
+          {
+            "id": "jacket-olive",
+            "category": "jacket"
+          },
+          {
+            "id": "jeans-dark",
+            "category": "jeans"
+          },
+          {
+            "id": "pants-warm",
+            "category": "warmpants"
+          },
+          {
+            "id": "sneakers-white",
+            "category": "sneakers"
+          },
+          {
+            "id": "boots-brown",
+            "category": "boots"
+          }
+        ],
+        "window": {
+          "minFeelsC": 25,
+          "maxFeelsC": 29
+        },
+        "offsetC": 0,
+        "today": "2026-11-09",
+        "wears": [
+          {
+            "date": "2026-11-08",
+            "itemIds": [
+              "tee-white"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "status": "ok",
+        "effC": 25,
+        "requiredWarmth": 1,
+        "upperWarmth": 1,
+        "outfit": {
+          "base": "tee-black",
+          "mid": null,
+          "outer": null,
+          "bottom": "jeans-dark",
+          "shoes": "sneakers-white"
+        },
+        "outerClosed": null,
+        "shortfall": 0
+      }
+    },
+    {
+      "name": "incomplete closet: no shoes",
+      "fn": "recommend",
+      "input": {
+        "items": [
+          {
+            "id": "tee-white",
+            "category": "tee"
+          },
+          {
+            "id": "tee-black",
+            "category": "tee"
+          },
+          {
+            "id": "ls-grey",
+            "category": "longsleeve"
+          },
+          {
+            "id": "sweat-grey",
+            "category": "sweatshirt"
+          },
+          {
+            "id": "lj-navy",
+            "category": "lightjacket"
+          },
+          {
+            "id": "jacket-olive",
+            "category": "jacket"
+          },
+          {
+            "id": "jeans-dark",
+            "category": "jeans"
+          },
+          {
+            "id": "pants-warm",
+            "category": "warmpants"
+          }
+        ],
+        "window": {
+          "minFeelsC": 20,
+          "maxFeelsC": 24
+        },
+        "offsetC": 0,
+        "today": "2026-11-09",
+        "wears": []
+      },
+      "expected": {
+        "status": "incomplete",
+        "missing": [
+          "shoes"
+        ],
+        "effC": 20,
+        "requiredWarmth": 2
+      }
+    },
+    {
+      "name": "offset: three 'warmer' answers",
+      "fn": "personalOffset",
+      "input": [
+        {
+          "ts": "2026-11-08T19:00Z",
+          "sensation": -1,
+          "preference": "warmer"
+        },
+        {
+          "ts": "2026-11-09T17:57Z",
+          "sensation": -2,
+          "preference": "warmer"
+        },
+        {
+          "ts": "2026-11-09T18:20Z",
+          "sensation": -1,
+          "preference": "warmer"
+        }
+      ],
+      "expected": -1.5
+    },
+    {
+      "name": "offset: capped at -3",
+      "fn": "personalOffset",
+      "input": [
+        {
+          "ts": "2026-11-00T08:00Z",
+          "sensation": -2,
+          "preference": "warmer"
+        },
+        {
+          "ts": "2026-11-01T08:00Z",
+          "sensation": -2,
+          "preference": "warmer"
+        },
+        {
+          "ts": "2026-11-02T08:00Z",
+          "sensation": -2,
+          "preference": "warmer"
+        },
+        {
+          "ts": "2026-11-03T08:00Z",
+          "sensation": -2,
+          "preference": "warmer"
+        },
+        {
+          "ts": "2026-11-04T08:00Z",
+          "sensation": -2,
+          "preference": "warmer"
+        },
+        {
+          "ts": "2026-11-05T08:00Z",
+          "sensation": -2,
+          "preference": "warmer"
+        },
+        {
+          "ts": "2026-11-06T08:00Z",
+          "sensation": -2,
+          "preference": "warmer"
+        },
+        {
+          "ts": "2026-11-07T08:00Z",
+          "sensation": -2,
+          "preference": "warmer"
+        },
+        {
+          "ts": "2026-11-08T08:00Z",
+          "sensation": -2,
+          "preference": "warmer"
+        },
+        {
+          "ts": "2026-11-09T08:00Z",
+          "sensation": -2,
+          "preference": "warmer"
+        }
+      ],
+      "expected": -3
+    },
+    {
+      "name": "bands: 15C needs 3, 14.9C needs 5",
+      "fn": "requiredWarmth",
+      "input": [
+        15,
+        14.9
+      ],
+      "expected": [
+        3,
+        5
+      ]
+    }
+  ]
+}

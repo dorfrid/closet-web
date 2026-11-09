@@ -1,0 +1,20 @@
+// All UI text in one place (English). Ports reuse the same keys.
+export const S = {
+  today: "Today", closet: "Closet", history: "History", settings: "Settings",
+  wearing: "I'm wearing this", another: "Another suggestion", tapSwap: "Tap an item to swap it",
+  loggedToday: "Logged for today", undo: "Undo",
+  howFeel: "How does it feel right now?", rateNow: "Rate how it feels",
+  rather: "Would you rather be…", skip: "Skip", save: "Save",
+  place: "Place", wearingNow: "Wearing", change: "Change", timeHere: "Time here",
+  scale: [["Cold", -3], ["Cool", -2], ["Slightly cool", -1], ["Neutral", 0], ["Slightly warm", 1], ["Warm", 2], ["Hot", 3]],
+  prefs: [["Warmer", "warmer"], ["No change", "no change"], ["Cooler", "cooler"]],
+  places: ["Outside sun", "Outside shade", "Indoors AC", "Indoors no AC", "Car"],
+  minutes: [["Under 15 min", 10], ["15–30 min", 20], ["Over 30 min", 45]],
+  starterTitle: (n, g) => `${n} of ${g} starter items`,
+  addItems: "Add clothes", camera: "Take photos", photos: "Choose from Photos",
+  pickCategory: "What is it?", removeBg: "Remove background", removingBg: "Removing background…",
+  laundry: "In the wash", clean: "Clean", del: "Delete item",
+  export: "Export everything (JSON)", import: "Import from file", deleteAll: "Delete everything",
+  noLog: "No outfit logged", sameAs: d => `Same as ${d}`,
+  offline: t => `forecast from ${t}`, refresh: "Refresh",
+};

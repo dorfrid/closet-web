@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "_comment": "Engine thresholds. Shared by web, iOS and Android ports. Change values here, not in code.",
+  "warmthBands": [
+    { "minFeelsC": 27, "requiredUpperWarmth": 0 },
+    { "minFeelsC": 23, "requiredUpperWarmth": 1 },
+    { "minFeelsC": 19, "requiredUpperWarmth": 2 },
+    { "minFeelsC": 15, "requiredUpperWarmth": 3 },
+    { "minFeelsC": 10, "requiredUpperWarmth": 5 },
+    { "minFeelsC": 5, "requiredUpperWarmth": 6 },
+    { "minFeelsC": -99, "requiredUpperWarmth": 8 }
+  ],
+  "closeOuterBelowC": 18,
+  "warmBottomBelowC": 10,
+  "openOuterWarmthPenalty": 1,
+  "recentlyWornDays": 2,
+  "recentlyWornPenalty": 5,
+  "overshootWeight": 3,
+  "undershootWeight": 20,
+  "personalOffset": { "stepC": 0.5, "capC": 3, "lastNRatings": 30 },
+  "categories": {
+    "tank":        { "slot": "base",   "warmth": 0, "label": "Tank top" },
+    "tee":         { "slot": "base",   "warmth": 1, "label": "T-shirt" },
+    "polo":        { "slot": "base",   "warmth": 1, "label": "Polo" },
+    "shirt":       { "slot": "base",   "warmth": 1, "label": "Shirt" },
+    "longsleeve":  { "slot": "base",   "warmth": 2, "label": "Long sleeve" },
+    "sweater":     { "slot": "mid",    "warmth": 2, "label": "Sweater" },
+    "sweatshirt":  { "slot": "mid",    "warmth": 2, "label": "Sweatshirt" },
+    "lightjacket": { "slot": "outer",  "warmth": 2, "label": "Light jacket" },
+    "jacket":      { "slot": "outer",  "warmth": 3, "label": "Jacket" },
+    "coat":        { "slot": "outer",  "warmth": 4, "label": "Coat" },
+    "shorts":      { "slot": "bottom", "warmth": 0, "label": "Shorts" },
+    "pants":       { "slot": "bottom", "warmth": 1, "label": "Pants" },
+    "jeans":       { "slot": "bottom", "warmth": 1, "label": "Jeans" },
+    "warmpants":   { "slot": "bottom", "warmth": 2, "label": "Warm pants" },
+    "sneakers":    { "slot": "shoes",  "warmth": 0, "label": "Sneakers" },
+    "shoes":       { "slot": "shoes",  "warmth": 0, "label": "Shoes" },
+    "boots":       { "slot": "shoes",  "warmth": 1, "label": "Boots" },
+    "sandals":     { "slot": "shoes",  "warmth": 0, "label": "Sandals" }
+  },
+  "starterSet": { "base": 3, "bottom": 2, "shoes": 1, "outer": 1, "total": 10 }
+}
