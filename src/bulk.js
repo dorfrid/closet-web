@@ -63,7 +63,7 @@ async function run(ctx, files, api) {
       const slot = cfg.categories[g.category].slot;
       const region = slot === "bottom" ? "lower" : slot === "shoes" ? "shoes" : g.outermost ? "upper" : null;
       const cut = region ? cuts[region] : null;
-      entries.push({ key: `p${i}g${j}`, photo: i, date: files[i].lastModified, category: g.category, color: g.color || "", description: g.description || "",
+      entries.push({ key: `p${i}g${j}`, photo: i, date: files[i].lastModified, category: g.category, color: g.color || "", description: g.description || "", brand: typeof g.brand === "string" ? g.brand.trim().slice(0, 40) : "",
         visibility: g.visibility, crop: cut?.blob || null, area: cut?.area || 0, group: analysis.candidates.length > 1 });
     });
     done++;
@@ -234,7 +234,7 @@ function pieceCheck(ctx, entries, groups, failures, nPhotos) {
         let photoId = null;
         if (c.best.crop) { photoId = uid(); await db.put("photos", { id: photoId, original: c.best.crop, cutout: c.best.crop, createdAt: nowISO(), source: "bulk" }); }
         const item = { id: uid(), category, name: cap(`${c.best.color} ${cfg.categories[category].label.toLowerCase()}`).slice(0, 60), description: c.best.description,
-          photoId, status: "clean", source: "bulk", createdAt: nowISO(), updatedAt: nowISO(), deletedAt: null };
+          brand: c.members.find(m => m.brand)?.brand || "", model: "", photoId, status: "clean", source: "bulk", createdAt: nowISO(), updatedAt: nowISO(), deletedAt: null };
         await db.put("items", item); state.items.push(item); idByGroup[c.gi] = item.id;
       }
       let days = 0;

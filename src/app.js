@@ -8,7 +8,7 @@ import { testKey } from "./claude.js";
 import * as gsync from "./sync.js";
 import { recommend, alternatives, personalOffset, summarizeWindow, starterProgress, feelsLike } from "../shared/engine.js";
 
-const APP_VERSION = "0.9.0", SCHEMA = 1, PLATFORM = "web";
+const APP_VERSION = "0.9.1", SCHEMA = 1, PLATFORM = "web";
 const DEFAULT_LOC = { lat: 32.08, lon: 34.78, city: "Tel Aviv" };
 let cfg, state = { tab: "today", items: [], wears: [], ratings: [], settings: null, forecast: null };
 const $ = s => document.querySelector(s);
@@ -71,7 +71,7 @@ async function hydrateImages(root = document) {
 }
 function tileHTML(item, meta, attrs = "") {
   const label = esc(item.name || cfg.categories[item.category]?.label || "Item");
-  return `<button class="tile" ${attrs}><span class="img" data-photo="${esc(item.photoId || "")}"><span class="ph">${label}</span>${item.processing ? '<span class="badge">Processing</span>' : ""}</span><span class="name">${label}</span>${meta ? `<span class="meta">${esc(meta)}</span>` : ""}</button>`;
+  return `<button class="tile" ${attrs}><span class="img" data-photo="${esc(item.photoId || "")}"><span class="ph">${label}</span>${item.processing ? '<span class="badge">Processing</span>' : ""}</span><span class="name">${label}</span>${meta || item.brand ? `<span class="meta">${esc([item.brand, meta].filter(Boolean).join(" · "))}</span>` : ""}</button>`;
 }
 
 // ---------- engine glue ----------
@@ -331,11 +331,27 @@ function pickCategory(photoId) {
     });
   });
 }
+// Brands: the user's own brands first, then common ones. Suggest moving a brand out of an older free-text name.
+function brandOptions() {
+  const mine = [...new Set(state.items.map(i => i.brand).filter(Boolean))];
+  return [...mine, ...(cfg.knownBrands || []).filter(b => !mine.some(m => m.toLowerCase() === b.toLowerCase()))];
+}
+const reEsc = t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const brandRe = b => new RegExp(`(^|[\\s\\-–·,:(])${reEsc(b)}(?=$|[\\s\\-–·,:)])`, "i");
+function brandInName(it) {
+  if (it.brand || !it.name) return null;
+  return brandOptions().filter(b => brandRe(b).test(it.name)).sort((a, b) => b.length - a.length)[0] || null;
+}
 async function openItem(id) {
   const it = itemById(id);
   const opts = Object.entries(cfg.categories).map(([k, c]) => `<option value="${k}" ${k === it.category ? "selected" : ""}>${c.label}</option>`).join("");
   sheet(`<div class="tile"><span class="img" data-photo="${esc(it.photoId || "")}"></span></div>
     <input type="text" id="nm" placeholder="Name, e.g. Navy light jacket" value="${esc(it.name)}">
+    <div class="row" style="gap:8px;align-items:flex-start">
+      <label style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px"><span class="small">Brand (optional)</span><input type="text" id="br" list="brands" placeholder="e.g. Nike" value="${esc(it.brand || "")}" autocomplete="off"></label>
+      <label style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px"><span class="small">Model (optional)</span><input type="text" id="md" placeholder="e.g. Air Max 90" value="${esc(it.model || "")}" autocomplete="off"></label></div>
+    <datalist id="brands">${brandOptions().map(b => `<option value="${esc(b)}">`).join("")}</datalist>
+    ${brandInName(it) ? `<button class="chip" id="mvbr">Move “${esc(brandInName(it))}” to Brand</button>` : ""}
     <select id="cat">${opts}</select>
     <div class="chips"><button class="chip" id="st" aria-pressed="${it.status === "laundry"}">${S.laundry}</button></div>
     <button class="btn" id="bg">${S.removeBg}</button><p class="small hidden" id="bgp"></p>
@@ -363,10 +379,21 @@ async function openItem(id) {
       } catch (e) { clearInterval(tick); console.warn(e); logEvent("background_removed", { ok: false, error: String(e.message || e).slice(0, 80) }); msg.textContent = "Could not remove the background. The original photo is kept. (" + String(e.message || e).slice(0, 120) + ")"; }
     };
     el.querySelector("#sv").onclick = async () => {
+      const hadBrand = !!it.brand;
       Object.assign(it, { name: el.querySelector("#nm").value.trim().slice(0, 60), category: el.querySelector("#cat").value,
+        brand: el.querySelector("#br").value.trim().slice(0, 40), model: el.querySelector("#md").value.trim().slice(0, 40),
         status: el.querySelector("#st").getAttribute("aria-pressed") === "true" ? "laundry" : "clean", updatedAt: nowISO() });
-      await db.put("items", it); await db.kvSet("suggest:" + localDate(), null); close(); render();
+      await db.put("items", it); await db.kvSet("suggest:" + localDate(), null);
+      logEvent("item_edited", { category: it.category, hasBrand: !!it.brand, hasModel: !!it.model, brandAdded: !hadBrand && !!it.brand });
+      close(); render();
     };
+    el.querySelector("#mvbr") && (el.querySelector("#mvbr").onclick = e => {
+      const b = brandInName({ name: el.querySelector("#nm").value });
+      if (!b) { e.target.remove(); return; }
+      el.querySelector("#br").value = b;
+      el.querySelector("#nm").value = el.querySelector("#nm").value.replace(brandRe(b), "$1").replace(/\s{2,}/g, " ").replace(/^[\s\-–·,:]+|[\s\-–·,:]+$/g, "");
+      e.target.remove();
+    });
     el.querySelector("#dl").onclick = async () => {
       if (!confirm("Delete this item? Its history stays.")) return;
       it.deletedAt = nowISO(); await db.put("items", it); state.items = state.items.filter(x => x.id !== id);
