@@ -8,7 +8,7 @@ import { testKey } from "./claude.js";
 import * as gsync from "./sync.js";
 import { recommend, alternatives, personalOffset, summarizeWindow, starterProgress, feelsLike } from "../shared/engine.js";
 
-const APP_VERSION = "0.9.2", SCHEMA = 1, PLATFORM = "web";
+const APP_VERSION = "0.9.3", SCHEMA = 1, PLATFORM = "web";
 const DEFAULT_LOC = { lat: 32.08, lon: 34.78, city: "Tel Aviv" };
 let cfg, state = { tab: "today", items: [], wears: [], ratings: [], settings: null, forecast: null };
 const $ = s => document.querySelector(s);
